@@ -26,6 +26,6 @@
     "noEmit": true
   },
   "exclude": [
-    "App.native.tsx"
+    "App.tsx"
   ]
 }
