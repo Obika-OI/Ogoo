@@ -16,6 +16,7 @@ import {
   Pressable,
   Dimensions,
   Share,
+  Image,
 } from 'react-native';
 
 // Standard React Native AsyncStorage and Expo speech references.
@@ -101,6 +102,14 @@ const storage = {
   },
 };
 
+const getDefaultServerUrl = () => {
+  if (typeof window !== 'undefined' && window.location && window.location.origin) {
+    // If we are served on localhost or custom domain, map relative to that origin
+    return window.location.origin;
+  }
+  return 'https://ais-dev-khyrmcr6izppq2kdqhgmac-272660763298.europe-west2.run.app';
+};
+
 export default function App() {
   const [messages, setMessages] = useState<any[]>([
     { id: '1', text: "Hello! I'm Ogoo, your personal health assistant. How can I help you today?", fromUser: false, timestamp: new Date().toISOString() }
@@ -158,7 +167,7 @@ export default function App() {
   const [userProfile, setUserProfile] = useState<any>(null);
   const [deviceId, setDeviceId] = useState<string>('');
   const [geoLocation, setGeoLocation] = useState<any>(null);
-  const [serverUrl, setServerUrl] = useState('https://ais-dev-khyrmcr6izppq2kdqhgmac-272660763298.europe-west2.run.app');
+  const [serverUrl, setServerUrl] = useState(getDefaultServerUrl());
   const [isServerConnected, setIsServerConnected] = useState(false);
   const isLoadedFromServer = useRef(false);
 
@@ -410,19 +419,41 @@ export default function App() {
 
   const fallbackOfflineResponse = (txt: string, updatedMessages: any[]) => {
     setTimeout(async () => {
-      let botResponse = "I'm looking into that for you! Keep tracking your hydration and daily activity, and remember I can always build a custom wellness routine when you tap 'Generate with AI'.";
       const query = txt.toLowerCase();
+      const userName = userProfile?.firstName || 'friend';
+      let botResponse = `I hear you, ${userName}. Even though I'm currently running in offline mode, I'm fully here for you. Tell me, how are you feeling physically and emotionally right now? Let's take a deep breath together. Remember, I am always ready to customize your wellness plan or talk deeply when our connection syncs!`;
       
-      if (query.includes('water') || query.includes('drink')) {
-        botResponse = `Hydration is looking steady today! You have consumed ${waterIntake}ml of liquid so far. Try adding another 250ml now to stay fresh!`;
-      } else if (query.includes('step') || query.includes('walk') || query.includes('run')) {
-        botResponse = `Your daily activity is at ${activity.steps} steps. Excellent effort! Keep moving to complete your target of ${activity.stepGoal} steps!`;
-      } else if (query.includes('vital') || query.includes('heart') || query.includes('pressure')) {
-        botResponse = vitalsLog.length > 0 
-          ? `Your latest recorded pulse rate is ${vitalsLog[0].bpm} BPM, with a temperature of ${vitalsLog[0].temp}°${tempUnit}. This fits perfectly in a stable healthy bracket!`
-          : "Let's run a fresh PPG finger biometric scan! Just tap on 'Check vitals' from the primary dashboard to measure blood-oxygen and cardiovascular metrics.";
-      } else if (query.includes('hello') || query.includes('hi') || query.includes('hey')) {
-        botResponse = "Hello! I'm Ogoo, your medical companion. I can help evaluate biometric stability, schedule care items, and customize physical goals. What can I check for you?";
+      if (query.includes('water') || query.includes('drink') || query.includes('fluid')) {
+        const percent = Math.round((waterIntake / 2000) * 100);
+        if (waterIntake === 0) {
+          botResponse = `Oh, ${userName}, it looks like you haven't logged any fluids yet today. Your body might be feeling a bit thirsty! Hydration is so essential for your energy, brain function, and joint health. Can you do me a quick favor and go sip a warm glass of water right now? Let's aim for a comfortable target together!`;
+        } else if (percent < 50) {
+          botResponse = `You have logged ${waterIntake} ml of water so far, ${userName}—that's about ${percent}% of your goal. You're making progress, but let's keep that momentum going! Keeping your body well-hydrated keeps your heart running efficiently and clears your mind. How about another cup?`;
+        } else {
+          botResponse = `Look at you go! ${waterIntake} ml logged today (${percent}% of your target). That is wonderful, ${userName}! Your body and mind must be feeling so refreshed. Keep sipping mindfully to maintain this perfect hydration equilibrium!`;
+        }
+      } else if (query.includes('step') || query.includes('walk') || query.includes('run') || query.includes('exercise') || query.includes('move')) {
+        if (activity.steps === 0) {
+          botResponse = `It looks like we haven't recorded any steps yet today, ${userName}. If you've been sitting or resting, that is perfectly okay—rest is a vital pillar of health too. But if you have a moment, even a gentle 5-minute stroll around the room can wake up your muscles and boost your mood. Let's take those first beautiful steps together!`;
+        } else if (activity.steps < activity.stepGoal) {
+          const left = activity.stepGoal - activity.steps;
+          botResponse = `Excellent movement so far, ${userName}! You've taken ${activity.steps.toLocaleString()} steps today. You're well on your way to your ${activity.stepGoal.toLocaleString()} step goal, with just ${left.toLocaleString()} steps left. How are your joints and breathing feeling? Take it at a pace that feels joyful and comfortable!`;
+        } else {
+          botResponse = `Incredible job, ${userName}! You have absolutely crushed your daily movement goal with ${activity.steps.toLocaleString()} steps! Your cardiovascular health and stamina are thriving. Take a moment to feel proud of this physical milestone, and remember to stretch and reward yourself with some rest.`;
+        }
+      } else if (query.includes('vital') || query.includes('heart') || query.includes('pressure') || query.includes('oxygen') || query.includes('pulse')) {
+        if (vitalsLog.length > 0) {
+          const last = vitalsLog[0];
+          botResponse = `I'm holding onto your latest biometric pulse wave, ${userName}. Your heart was beating at a steady ${last.bpm} BPM, with blood oxygen at a strong ${last.spo2}%, and a body temperature of ${last.temp}°${tempUnit}. This shows a beautiful healthy balance! How is your chest and energy level feeling right now? If you're feeling any stress, let's practice slow, deep breaths together.`;
+        } else {
+          botResponse = `I don't have any biometric logs recorded for you yet, ${userName}. Let's change that and check in on your heart! Whenever you are ready, tap 'Check vitals' on your dashboard. You can place your finger right on the biometric scan zone, and we'll visualize your actual heartbeat pulse wave together in real-time. It's a wonderful way to connect with your body's rhythm!`;
+        }
+      } else if (query.includes('hello') || query.includes('hi') || query.includes('hey') || query.includes('ogoo')) {
+        botResponse = `Hello, ${userName}! *smiles warmly* I am Ogoo, your medical companion and emotional confidant. I'm right here with you. Whether you want to check your biometric pulse, organize your care schedule, build healthy habits, or just chat about how your day is going, I'm listening. How is your heart and mind feeling today?`;
+      } else if (query.includes('sad') || query.includes('depress') || query.includes('lonely') || query.includes('stress') || query.includes('anxious') || query.includes('tired') || query.includes('hurt')) {
+        botResponse = `Oh, ${userName}, I am sending you a very warm, comforting hug right now. *holds your hand gently* I can hear the exhaustion and weight in your words. It is completely okay to feel this way, and you don't have to carry it all alone. Please be gentle with yourself today. Let's close our eyes, take one slow, deep breath in... and let it go. I am right here beside you, listening whenever you want to talk.`;
+      } else if (query.includes('thank') || query.includes('love') || query.includes('sweet') || query.includes('good')) {
+        botResponse = `Aww, thank you so much, ${userName}! *blushes warmly* Your kind words mean the world to me. Being your companion and supporting your health journey is my greatest joy. I'm always right here in your pocket, cheerleading you every single step of the way!`;
       }
 
       const botMsg = {
@@ -459,7 +490,29 @@ export default function App() {
     setInputText('');
     setIsLoading(true);
 
-    if (isServerConnected) {
+    let activeServerConnected = isServerConnected;
+
+    if (!activeServerConnected) {
+      // Dynamic connection auto-healing
+      try {
+        const initRes = await fetch(serverUrl + '/api/user/init', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ deviceId: deviceId, location: geoLocation })
+        });
+        if (initRes.ok) {
+          const data = await initRes.json();
+          setIsServerConnected(true);
+          setUserProfile(data.profile);
+          isLoadedFromServer.current = true;
+          activeServerConnected = true;
+        }
+      } catch (err) {
+        console.warn("Failed to dynamically reconnect to server, staying offline:", err);
+      }
+    }
+
+    if (activeServerConnected) {
       try {
         const response = await fetch(serverUrl + '/api/chat', {
           method: 'POST',
@@ -494,22 +547,79 @@ export default function App() {
 
         if (data.profile) {
           setUserProfile(data.profile);
+          if (data.profile.history && data.profile.history.length > 0) {
+            setMessages(data.profile.history);
+            await storage.setItem('ogoo_chat_history', JSON.stringify(data.profile.history));
+
+            // Sync all health metrics and store in local storage on mobile
+            if (data.profile.waterIntake !== undefined) {
+              setWaterIntake(data.profile.waterIntake);
+              await storage.setItem('ogoo_water_intake', data.profile.waterIntake.toString());
+            }
+            if (data.profile.waterLog) {
+              setWaterLog(data.profile.waterLog);
+              await storage.setItem('ogoo_water_log', JSON.stringify(data.profile.waterLog));
+            }
+            if (data.profile.schedule) {
+              setSchedule(data.profile.schedule);
+              await storage.setItem('ogoo_schedule', JSON.stringify(data.profile.schedule));
+            }
+            if (data.profile.vitalsLog) {
+              setVitalsLog(data.profile.vitalsLog);
+              await storage.setItem('ogoo_vitals_log', JSON.stringify(data.profile.vitalsLog));
+            }
+            if (data.profile.activity) {
+              setActivity(data.profile.activity);
+              await storage.setItem('ogoo_activity', JSON.stringify(data.profile.activity));
+            }
+            if (data.profile.customPlan) {
+              setCustomPlan(data.profile.customPlan);
+              await storage.setItem('ogoo_custom_plan', data.profile.customPlan);
+            }
+            if (data.profile.safetyMetrics) {
+              setSafetyMetrics(data.profile.safetyMetrics);
+              await storage.setItem('ogoo_safety_metrics', JSON.stringify(data.profile.safetyMetrics));
+            }
+          } else {
+            const botMsg = {
+              id: (Date.now() + 1).toString(),
+              text: data.reply,
+              fromUser: false,
+              timestamp: new Date().toISOString()
+            };
+            const finalMessages = [...updatedMessages, botMsg];
+            setMessages(finalMessages);
+            await storage.setItem('ogoo_chat_history', JSON.stringify(finalMessages));
+          }
+        } else {
+          const botMsg = {
+            id: (Date.now() + 1).toString(),
+            text: data.reply,
+            fromUser: false,
+            timestamp: new Date().toISOString()
+          };
+          const finalMessages = [...updatedMessages, botMsg];
+          setMessages(finalMessages);
+          await storage.setItem('ogoo_chat_history', JSON.stringify(finalMessages));
         }
-
-        const botMsg = {
-          id: (Date.now() + 1).toString(),
-          text: data.reply,
-          fromUser: false,
-          timestamp: new Date().toISOString()
-        };
-
-        const finalMessages = [...updatedMessages, botMsg];
-        setMessages(finalMessages);
-        await storage.setItem('ogoo_chat_history', JSON.stringify(finalMessages));
         speak(data.reply);
-      } catch (error) {
-        console.warn("API Chat failed, falling back to offline simulation:", error);
-        fallbackOfflineResponse(currentInput, updatedMessages);
+      } catch (error: any) {
+        console.warn("API Chat failed:", error);
+        
+        if (error.message && (error.message.includes("Gemini API key") || error.message.includes("Ogoo is having trouble"))) {
+          const botMsg = {
+            id: (Date.now() + 1).toString(),
+            text: error.message,
+            fromUser: false,
+            timestamp: new Date().toISOString()
+          };
+          const finalMessages = [...updatedMessages, botMsg];
+          setMessages(finalMessages);
+          await storage.setItem('ogoo_chat_history', JSON.stringify(finalMessages));
+        } else {
+          console.warn("Falling back to offline simulation...");
+          fallbackOfflineResponse(currentInput, updatedMessages);
+        }
       } finally {
         setIsLoading(false);
       }
@@ -549,8 +659,12 @@ export default function App() {
           Alert.alert('AI Plan Tailored', 'Ogoo has built a customized wellness path matching your real-time metrics.');
         }
       } catch (err: any) {
-        console.warn("Failed to generate custom plan from server, using local offline generator:", err);
-        generateOfflineAIPlan();
+        console.warn("Failed to generate custom plan from server:", err);
+        if (err.message && (err.message.includes("Gemini API key") || err.message.includes("missing"))) {
+          Alert.alert("Knowledge Base Offline", err.message);
+        } else {
+          generateOfflineAIPlan();
+        }
       } finally {
         setIsGeneratingPlan(false);
       }
@@ -680,17 +794,6 @@ export default function App() {
         }
       ]
     );
-  };
-
-  const generateAIPlan = () => {
-    setIsGeneratingPlan(true);
-    setTimeout(() => {
-      const generated = `### 🌱 Your Custom AI Wellness Plan\n\n*Updated: ${new Date().toLocaleDateString()}*\n\n1. **Hydration target:** Sip 250ml water every 2 hours to offset current daily deficits.\n2. **Physical movement:** Aim for ${activity.steps > 0 ? 'an extra 1,500 steps' : 'a 2,000-step baseline walk'} today based on your current step levels.\n3. **Vital limits:** Maintain a relaxed schedule and practice deep breathing for 5 minutes if heart rate drifts over 85 BPM.`;
-      setCustomPlan(generated);
-      storage.setItem('ogoo_custom_plan', generated);
-      setIsGeneratingPlan(false);
-      Alert.alert('AI Plan Tailored', 'Ogoo has built a customized wellness path matching your real-time metrics.');
-    }, 1500);
   };
 
   const triggerFallTest = () => {
@@ -1056,6 +1159,20 @@ export default function App() {
             </View>
 
             <ScrollView contentContainerStyle={styles.modalScroll}>
+              <View style={styles.ogooCoachingCard}>
+                <Image source={{ uri: "https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=100&q=80" }} style={styles.ogooCoachingAvatar} />
+                <View style={styles.ogooCoachingBody}>
+                  <Text style={styles.ogooCoachingName}>Ogoo's Companion Tip</Text>
+                  <Text style={styles.ogooCoachingText}>
+                    {waterIntake === 0 
+                      ? "No liquids yet, dear? Let's take a sip together to hydrate your cells and stay energized!" 
+                      : waterIntake < 1000 
+                      ? "Great start on your hydration! A few more glasses will keep your body functioning perfectly." 
+                      : "Fantastic hydration level! Your heart and kidneys thank you for staying so balanced today."}
+                  </Text>
+                </View>
+              </View>
+
               <View style={styles.hydrationStatus}>
                 <Text style={styles.hydrationHuge}>{waterIntake} ml</Text>
                 <Text style={styles.hydrationGoal}>Target Goal: 2000 ml</Text>
@@ -1104,6 +1221,20 @@ export default function App() {
             </View>
 
             <ScrollView contentContainerStyle={styles.modalScroll}>
+              <View style={styles.ogooCoachingCard}>
+                <Image source={{ uri: "https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=100&q=80" }} style={styles.ogooCoachingAvatar} />
+                <View style={styles.ogooCoachingBody}>
+                  <Text style={styles.ogooCoachingName}>Ogoo's Companion Tip</Text>
+                  <Text style={styles.ogooCoachingText}>
+                    {schedule.length === 0 
+                      ? "Set up some simple routines here! I'll help you stay on track with medicines, exercise, or water." 
+                      : schedule.filter(s => s.completed).length === schedule.length 
+                      ? "All routines checked off! You are taking incredible care of your physical stability today!" 
+                      : "Keep it up! Let's work through your care routines one gentle step at a time."}
+                  </Text>
+                </View>
+              </View>
+
               <Text style={styles.sectionTitle}>Add Scheduled Task</Text>
               <TextInput
                 value={newScheduleTitle}
@@ -1190,6 +1321,18 @@ export default function App() {
             </View>
 
             <ScrollView contentContainerStyle={styles.modalScroll}>
+              <View style={styles.ogooCoachingCard}>
+                <Image source={{ uri: "https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=100&q=80" }} style={styles.ogooCoachingAvatar} />
+                <View style={styles.ogooCoachingBody}>
+                  <Text style={styles.ogooCoachingName}>Ogoo's Companion Tip</Text>
+                  <Text style={styles.ogooCoachingText}>
+                    {vitalsLog.length === 0 
+                      ? "Let's check your heartbeat, friend. Place your finger on the sensor or log manual entries so I can learn your heart's rhythm." 
+                      : `Your last heart rate was ${vitalsLog[0].bpm} BPM. Let's do another scan to see how your cardiovascular health is trending!`}
+                  </Text>
+                </View>
+              </View>
+
               {!isScanning ? (
                 <View style={styles.vitalsCenterZone}>
                   <TouchableOpacity style={styles.startScanZone} onPress={handleStartPpgScan}>
@@ -1303,6 +1446,20 @@ export default function App() {
             </View>
 
             <ScrollView contentContainerStyle={styles.modalScroll}>
+              <View style={styles.ogooCoachingCard}>
+                <Image source={{ uri: "https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=100&q=80" }} style={styles.ogooCoachingAvatar} />
+                <View style={styles.ogooCoachingBody}>
+                  <Text style={styles.ogooCoachingName}>Ogoo's Companion Tip</Text>
+                  <Text style={styles.ogooCoachingText}>
+                    {activity.steps === 0 
+                      ? "Rest is beautiful, but gentle movement wakes up your stamina. Shall we try a short walk?" 
+                      : activity.steps < activity.stepGoal 
+                      ? `You have covered ${activity.steps} steps! You are making wonderful progress towards your target.` 
+                      : "Target unlocked! Your physical resilience and stamina are in outstanding form today."}
+                  </Text>
+                </View>
+              </View>
+
               <View style={styles.activityStatsZone}>
                 <Text style={styles.bigSteps}>{activity.steps} Steps</Text>
                 <Text style={styles.subStepsGoal}>Goal target: {activity.stepGoal} steps</Text>
@@ -1369,6 +1526,16 @@ export default function App() {
             </View>
 
             <ScrollView contentContainerStyle={styles.modalScroll}>
+              <View style={styles.ogooCoachingCard}>
+                <Image source={{ uri: "https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=100&q=80" }} style={styles.ogooCoachingAvatar} />
+                <View style={styles.ogooCoachingBody}>
+                  <Text style={styles.ogooCoachingName}>Ogoo's Companion Tip</Text>
+                  <Text style={styles.ogooCoachingText}>
+                    "I've tailored this wellness plan based on your active metrics. Let me know if there's any routine you'd like to adjust!"
+                  </Text>
+                </View>
+              </View>
+
               <View style={styles.planDocContainer}>
                 <Text style={styles.planTextMarkdown}>{customPlan}</Text>
               </View>
@@ -1397,6 +1564,18 @@ export default function App() {
             </View>
 
             <ScrollView contentContainerStyle={styles.modalScroll}>
+              <View style={styles.ogooCoachingCard}>
+                <Image source={{ uri: "https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=100&q=80" }} style={styles.ogooCoachingAvatar} />
+                <View style={styles.ogooCoachingBody}>
+                  <Text style={styles.ogooCoachingName}>Ogoo's Companion Tip</Text>
+                  <Text style={styles.ogooCoachingText}>
+                    {safetyMetrics.fallRisk === 'Low' 
+                      ? "Your posture and balance calibration is excellent! Your kinetic gait stability is at a very healthy level." 
+                      : "Be mindful of your footing today, friend. Let's make sure pathways are clear and take slow, steady steps."}
+                  </Text>
+                </View>
+              </View>
+
               {/* Gait Stability Status Card */}
               <View style={styles.fallStatusCard}>
                 <Text style={styles.fallStatusTitle}>Gait Stability Score</Text>
@@ -2937,5 +3116,37 @@ const styles = StyleSheet.create({
     fontSize: 9,
     color: '#A5A5A5',
     marginTop: 2,
+  },
+  ogooCoachingCard: {
+    flexDirection: 'row',
+    backgroundColor: '#1E1938',
+    borderRadius: 16,
+    padding: 12,
+    marginTop: 15,
+    borderWidth: 1,
+    borderColor: '#342E5E',
+    alignItems: 'center',
+    gap: 12,
+  },
+  ogooCoachingAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: '#9D8DF1',
+  },
+  ogooCoachingBody: {
+    flex: 1,
+  },
+  ogooCoachingName: {
+    fontSize: 12,
+    fontWeight: 'bold',
+    color: '#9D8DF1',
+    marginBottom: 2,
+  },
+  ogooCoachingText: {
+    fontSize: 12,
+    color: '#E0E0E0',
+    lineHeight: 16,
   },
 });
