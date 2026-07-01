@@ -28,6 +28,7 @@ interface UserRecord {
   vitalsLog?: any[];
   activity?: { steps: number; stepGoal: number; minutes: number; calories: number };
   customPlan?: string;
+  safetyMetrics?: any;
 }
 
 function loadDb(): Record<string, UserRecord> {
@@ -188,6 +189,9 @@ export async function startServer() {
           userRecord.activity = { steps: 0, stepGoal: 10000, minutes: 0, calories: 0 };
         }
         if (userRecord.customPlan === undefined) userRecord.customPlan = "";
+        if (!userRecord.safetyMetrics) {
+          userRecord.safetyMetrics = { fallRisk: 'Low', gaitStability: 98, phoneSensorSynced: false, sensorReading: { alpha: 0, beta: 0, gamma: 0 }, fallLogs: [] };
+        }
 
         // Warm update of location details if supplied and missing
         if (location && (!userRecord.location || !userRecord.location.city)) {
@@ -221,7 +225,8 @@ export async function startServer() {
         schedule: [],
         vitalsLog: [],
         activity: { steps: 0, stepGoal: 10000, minutes: 0, calories: 0 },
-        customPlan: ""
+        customPlan: "",
+        safetyMetrics: { fallRisk: 'Low', gaitStability: 98, phoneSensorSynced: false, sensorReading: { alpha: 0, beta: 0, gamma: 0 }, fallLogs: [] }
       };
       saveDb(db);
 
@@ -235,7 +240,7 @@ export async function startServer() {
   // Save/Update user metrics directly on the server database slice
   app.post("/api/user/update-metrics", (req, res) => {
     try {
-      const { deviceId, waterIntake, waterLog, schedule, vitalsLog, activity, customPlan } = req.body;
+      const { deviceId, waterIntake, waterLog, schedule, vitalsLog, activity, customPlan, safetyMetrics } = req.body;
       if (!deviceId) {
         return res.status(400).json({ error: "deviceId is required" });
       }
@@ -252,6 +257,7 @@ export async function startServer() {
       if (vitalsLog !== undefined) userRecord.vitalsLog = vitalsLog;
       if (activity !== undefined) userRecord.activity = activity;
       if (customPlan !== undefined) userRecord.customPlan = customPlan;
+      if (safetyMetrics !== undefined) userRecord.safetyMetrics = safetyMetrics;
 
       saveDb(db);
       res.json({ success: true, profile: userRecord });

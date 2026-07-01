@@ -3,7 +3,8 @@
   "description": "A health assistant application with complex health knowledge powered by Gemini.",
   "requestFramePermissions": [
     "microphone",
-    "geolocation"
+    "geolocation",
+    "camera"
   ],
   "majorCapabilities": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
