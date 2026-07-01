@@ -546,7 +546,7 @@ export default function App() {
             </TouchableOpacity>
 
             <TouchableOpacity style={styles.splitCard} onPress={() => setActiveModal('plan')}>
-              <Icon name="sparkles" size={24} color="#9D8DF1" style={styles.splitIcon} />
+            <Icon name="star-four-points" size={18} color="#9D8DF1" style={{ marginRight: 6 }} />
               <Text style={styles.splitTitle}>Personal Plan</Text>
               <Text style={styles.splitLink}>View Details</Text>
             </TouchableOpacity>
@@ -556,7 +556,7 @@ export default function App() {
           <View style={styles.collapseContainer}>
             <View style={styles.collapseHeader}>
               <View style={styles.collapseTitleRow}>
-                <Icon name="sparkles" size={18} color="#9D8DF1" style={{ marginRight: 6 }} />
+              <Icon name="star-four-points" size={18} color="#9D8DF1" style={{ marginRight: 6 }} />
                 <Text style={styles.collapseTitle}>Daily Companion Chat</Text>
               </View>
               <TouchableOpacity

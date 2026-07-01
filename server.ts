@@ -43,11 +43,13 @@ function loadDb(): Record<string, UserRecord> {
 }
 
 function saveDb(db: Record<string, UserRecord>) {
-  try {
-    fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2), "utf-8");
-  } catch (e) {
-    console.error("Failed to save users DB:", e);
-  }
+  console.trace("saveDb called");
+
+  fs.writeFileSync(
+    DB_FILE,
+    JSON.stringify(db, null, 2),
+    "utf-8"
+  );
 }
 
 const OGOO_SYSTEM_INSTRUCTION = `You are Ogoo, a highly intuitive, emotionally intelligent, empathetic, and social health & life companion.
@@ -89,7 +91,7 @@ export async function startServer() {
       if (!process.env.GEMINI_API_KEY) {
         throw new Error("GEMINI_API_KEY is not configured. Please add your GEMINI_API_KEY in the Secrets panel in the Google AI Studio settings.");
       }
-      ai = new GoogleGenAI({ 
+      ai = new GoogleGenAI({
         apiKey: process.env.GEMINI_API_KEY,
         httpOptions: { headers: { 'User-Agent': 'aistudio-build' } }
       });
@@ -132,9 +134,9 @@ export async function startServer() {
             });
           }
           if (text) {
-             session.sendRealtimeInput({
-                 text: text
-             });
+            session.sendRealtimeInput({
+              text: text
+            });
           }
         } catch (e) {
           console.error("Live API WS message error", e);
@@ -414,7 +416,7 @@ Use these metrics to provide highly personalized health coaching and answers! If
           }
         });
       }
-      
+
       const responseText = response.text || "";
 
       // 4. Parse any profile update tags from Gemini output
@@ -472,7 +474,7 @@ Use these metrics to provide highly personalized health coaching and answers! If
 
       // Save updated database
       saveDb(db);
-      
+
       // Extract search grounding if available
       let groundingChunks = null;
       if (model === "gemini-3.5-flash") {
@@ -493,7 +495,7 @@ Use these metrics to provide highly personalized health coaching and answers! If
     try {
       const { steps, stepGoal, waterIntake, waterGoal, bpm, bp, spo2, temp } = req.body;
       const currentAi = getAi();
-      
+
       const prompt = `Generate a highly personalized, structured wellness plan based on the following user health data:
 - Daily Steps: ${steps}/${stepGoal} steps
 - Hydration Intake: ${waterIntake}/${waterGoal} ml
@@ -562,7 +564,7 @@ Keep it realistic, highly tailored to their current vitals/activity level, and f
       const currentAi = getAi();
       const base64 = fileToBase64(file.filepath);
       let model = "gemini-3.5-flash"; // Default to highly competent & quota-friendly multimodal model
-      
+
       let response;
       try {
         response = await currentAi.models.generateContent({
