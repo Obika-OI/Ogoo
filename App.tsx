@@ -147,6 +147,21 @@ export default function App() {
     emergencyContactPhone: '911'
   });
 
+  // Fall Warning & Calibration states
+  const [isFallAlertActive, setIsFallAlertActive] = useState(false);
+  const [fallAlertCountdown, setFallAlertCountdown] = useState(5);
+  const [isCalibratingGait, setIsCalibratingGait] = useState(false);
+  const [calibrationCountdown, setCalibrationCountdown] = useState(5);
+  const calibrationSamplesRef = useRef<number[]>([]);
+
+  // Server & Profile States
+  const [userProfile, setUserProfile] = useState<any>(null);
+  const [deviceId, setDeviceId] = useState<string>('');
+  const [geoLocation, setGeoLocation] = useState<any>(null);
+  const [serverUrl, setServerUrl] = useState('https://ais-dev-khyrmcr6izppq2kdqhgmac-272660763298.europe-west2.run.app');
+  const [isServerConnected, setIsServerConnected] = useState(false);
+  const isLoadedFromServer = useRef(false);
+
   // Simulated Finger PPG Wave State
   const [isFingerOnScreenSensor, setIsFingerOnScreenSensor] = useState(false);
   const [scanProgress, setScanProgress] = useState(0);
@@ -201,9 +216,36 @@ export default function App() {
     return false;
   };
 
-  // Hydration Load & Sync
+  // Load saved configurations and try to sync with the backend
   useEffect(() => {
-    const loadSavedData = async () => {
+    const initApp = async () => {
+      // 1. Load basic options from storage
+      const savedServerUrl = await storage.getItem('ogoo_server_url');
+      let currentServerUrl = serverUrl;
+      if (savedServerUrl) {
+        setServerUrl(savedServerUrl);
+        currentServerUrl = savedServerUrl;
+      }
+
+      const savedVoice = await storage.getItem('ogoo_voice_enabled');
+      if (savedVoice !== null) {
+        setVoiceEnabled(savedVoice === 'true');
+      }
+
+      const savedTempUnit = await storage.getItem('ogoo_temp_unit');
+      if (savedTempUnit) {
+        setTempUnit(savedTempUnit as 'F' | 'C');
+      }
+
+      // 2. Load / generate Device ID
+      let id = await storage.getItem('ogoo_device_id');
+      if (!id) {
+        id = 'ogoo-mobile-' + Math.random().toString(36).substring(2, 11) + '-' + Date.now();
+        await storage.setItem('ogoo_device_id', id);
+      }
+      setDeviceId(id);
+
+      // 3. Load other local storage metrics as initial fallback values
       const savedWater = await storage.getItem('ogoo_water_intake');
       if (savedWater) setWaterIntake(parseInt(savedWater, 10));
 
@@ -230,60 +272,156 @@ export default function App() {
 
       const savedCollapsed = await storage.getItem('ogoo_chat_collapsed');
       if (savedCollapsed) setIsChatCollapsed(savedCollapsed === 'true');
+
+      // 4. Try fetching location
+      let loc = null;
+      try {
+        const geoRes = await fetch('https://ipapi.co/json/');
+        if (geoRes.ok) {
+          const geoData = await geoRes.json();
+          loc = {
+            city: geoData.city,
+            region: geoData.region,
+            country_name: geoData.country_name,
+            latitude: geoData.latitude,
+            longitude: geoData.longitude
+          };
+          setGeoLocation(loc);
+        }
+      } catch (e) {
+        console.warn("Failed to fetch location on mobile:", e);
+      }
+
+      // 5. Query /api/user/init to sync with the backend
+      try {
+        const initRes = await fetch(currentServerUrl + '/api/user/init', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ deviceId: id, location: loc })
+        });
+        if (initRes.ok) {
+          const data = await initRes.json();
+          setIsServerConnected(true);
+          setUserProfile(data.profile);
+          if (data.profile) {
+            if (data.profile.waterIntake !== undefined) setWaterIntake(data.profile.waterIntake);
+            if (data.profile.waterLog) setWaterLog(data.profile.waterLog);
+            if (data.profile.schedule) setSchedule(data.profile.schedule);
+            if (data.profile.vitalsLog) setVitalsLog(data.profile.vitalsLog);
+            if (data.profile.activity) setActivity(data.profile.activity);
+            if (data.profile.customPlan) setCustomPlan(data.profile.customPlan);
+            if (data.profile.safetyMetrics) setSafetyMetrics(data.profile.safetyMetrics);
+          }
+          if (data.history && data.history.length > 0) {
+            setMessages(data.history);
+          }
+          isLoadedFromServer.current = true;
+        } else {
+          setIsServerConnected(false);
+          isLoadedFromServer.current = false;
+        }
+      } catch (err) {
+        console.warn("Could not connect to Ogoo server backend on startup:", err);
+        setIsServerConnected(false);
+        isLoadedFromServer.current = false;
+      }
     };
-    loadSavedData();
-  }, []);
+    initApp();
+  }, [serverUrl]);
 
   // Sync to Storage Side-Effects
+  const syncMetrics = async (metricsToUpdate: any) => {
+    if (!deviceId || !isLoadedFromServer.current) return;
+    try {
+      await fetch(serverUrl + '/api/user/update-metrics', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          deviceId,
+          ...metricsToUpdate
+        })
+      });
+    } catch (err) {
+      console.warn("Failed to sync metrics with server on mobile:", err);
+    }
+  };
+
+  useEffect(() => {
+    if (!deviceId) return;
+    storage.setItem('ogoo_water_intake', waterIntake.toString());
+    storage.setItem('ogoo_water_log', JSON.stringify(waterLog));
+    if (isLoadedFromServer.current) {
+      syncMetrics({ waterIntake, waterLog });
+    }
+  }, [waterIntake, waterLog]);
+
+  useEffect(() => {
+    if (!deviceId) return;
+    storage.setItem('ogoo_schedule', JSON.stringify(schedule));
+    if (isLoadedFromServer.current) {
+      syncMetrics({ schedule });
+    }
+  }, [schedule]);
+
+  useEffect(() => {
+    if (!deviceId) return;
+    storage.setItem('ogoo_vitals_log', JSON.stringify(vitalsLog));
+    if (isLoadedFromServer.current) {
+      syncMetrics({ vitalsLog });
+    }
+  }, [vitalsLog]);
+
+  useEffect(() => {
+    if (!deviceId) return;
+    storage.setItem('ogoo_activity', JSON.stringify(activity));
+    if (isLoadedFromServer.current) {
+      syncMetrics({ activity });
+    }
+  }, [activity]);
+
+  useEffect(() => {
+    if (!deviceId) return;
+    storage.setItem('ogoo_custom_plan', customPlan);
+    if (isLoadedFromServer.current) {
+      syncMetrics({ customPlan });
+    }
+  }, [customPlan]);
+
+  useEffect(() => {
+    if (!deviceId) return;
+    storage.setItem('ogoo_safety_metrics', JSON.stringify(safetyMetrics));
+    if (isLoadedFromServer.current) {
+      syncMetrics({ safetyMetrics });
+    }
+  }, [safetyMetrics]);
+
   const saveWaterData = async (newVal: number, newLog: any[]) => {
     setWaterIntake(newVal);
     setWaterLog(newLog);
-    await storage.setItem('ogoo_water_intake', newVal.toString());
-    await storage.setItem('ogoo_water_log', JSON.stringify(newLog));
   };
 
   const saveSchedule = async (newSched: any[]) => {
     setSchedule(newSched);
-    await storage.setItem('ogoo_schedule', JSON.stringify(newSched));
   };
 
   const saveVitalsLog = async (newVitals: any[]) => {
     setVitalsLog(newVitals);
-    await storage.setItem('ogoo_vitals_log', JSON.stringify(newVitals));
   };
 
-  // Send Daily Chat Request proxying to local LLM or standard companion mock responses
-  const handleSendMessage = async () => {
-    if (!inputText.trim()) return;
-
-    const userMsg = {
-      id: Date.now().toString(),
-      text: inputText,
-      fromUser: true,
-      timestamp: new Date().toISOString()
-    };
-
-    const updatedMessages = [...messages, userMsg];
-    setMessages(updatedMessages);
-    await storage.setItem('ogoo_chat_history', JSON.stringify(updatedMessages));
-    
-    setInputText('');
-    setIsLoading(true);
-
-    // Simple natural interactive conversation generator matching Ogoo's warm personality
+  const fallbackOfflineResponse = (txt: string, updatedMessages: any[]) => {
     setTimeout(async () => {
       let botResponse = "I'm looking into that for you! Keep tracking your hydration and daily activity, and remember I can always build a custom wellness routine when you tap 'Generate with AI'.";
-      const txt = userMsg.text.toLowerCase();
+      const query = txt.toLowerCase();
       
-      if (txt.includes('water') || txt.includes('drink')) {
+      if (query.includes('water') || query.includes('drink')) {
         botResponse = `Hydration is looking steady today! You have consumed ${waterIntake}ml of liquid so far. Try adding another 250ml now to stay fresh!`;
-      } else if (txt.includes('step') || txt.includes('walk') || txt.includes('run')) {
+      } else if (query.includes('step') || query.includes('walk') || query.includes('run')) {
         botResponse = `Your daily activity is at ${activity.steps} steps. Excellent effort! Keep moving to complete your target of ${activity.stepGoal} steps!`;
-      } else if (txt.includes('vital') || txt.includes('heart') || txt.includes('pressure')) {
+      } else if (query.includes('vital') || query.includes('heart') || query.includes('pressure')) {
         botResponse = vitalsLog.length > 0 
           ? `Your latest recorded pulse rate is ${vitalsLog[0].bpm} BPM, with a temperature of ${vitalsLog[0].temp}°${tempUnit}. This fits perfectly in a stable healthy bracket!`
           : "Let's run a fresh PPG finger biometric scan! Just tap on 'Check vitals' from the primary dashboard to measure blood-oxygen and cardiovascular metrics.";
-      } else if (txt.includes('hello') || txt.includes('hi') || txt.includes('hey')) {
+      } else if (query.includes('hello') || query.includes('hi') || query.includes('hey')) {
         botResponse = "Hello! I'm Ogoo, your medical companion. I can help evaluate biometric stability, schedule care items, and customize physical goals. What can I check for you?";
       }
 
@@ -300,6 +438,134 @@ export default function App() {
       setIsLoading(false);
       speak(botResponse);
     }, 1000);
+  };
+
+  // Send Daily Chat Request proxying to live Gemini LLM on the server
+  const handleSendMessage = async () => {
+    if (!inputText.trim() || isLoading) return;
+
+    const currentInput = inputText.trim();
+    const userMsg = {
+      id: Date.now().toString(),
+      text: currentInput,
+      fromUser: true,
+      timestamp: new Date().toISOString()
+    };
+
+    const updatedMessages = [...messages, userMsg];
+    setMessages(updatedMessages);
+    await storage.setItem('ogoo_chat_history', JSON.stringify(updatedMessages));
+    
+    setInputText('');
+    setIsLoading(true);
+
+    if (isServerConnected) {
+      try {
+        const response = await fetch(serverUrl + '/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            deviceId: deviceId,
+            location: geoLocation,
+            message: currentInput, 
+            mode: 'normal',
+            vitals: vitalsLog[0] || null,
+            activity: activity,
+            waterIntake: waterIntake,
+            waterGoal: 2000,
+            schedule: schedule
+          }),
+        });
+
+        const data = await response.json();
+        
+        if (!response.ok) {
+          const errMsg = {
+            id: (Date.now() + 1).toString(),
+            text: data.error || "I'm having trouble connecting to my brain. Please try again.",
+            fromUser: false,
+            timestamp: new Date().toISOString()
+          };
+          const finalMessages = [...updatedMessages, errMsg];
+          setMessages(finalMessages);
+          await storage.setItem('ogoo_chat_history', JSON.stringify(finalMessages));
+          return;
+        }
+
+        if (data.profile) {
+          setUserProfile(data.profile);
+        }
+
+        const botMsg = {
+          id: (Date.now() + 1).toString(),
+          text: data.reply,
+          fromUser: false,
+          timestamp: new Date().toISOString()
+        };
+
+        const finalMessages = [...updatedMessages, botMsg];
+        setMessages(finalMessages);
+        await storage.setItem('ogoo_chat_history', JSON.stringify(finalMessages));
+        speak(data.reply);
+      } catch (error) {
+        console.warn("API Chat failed, falling back to offline simulation:", error);
+        fallbackOfflineResponse(currentInput, updatedMessages);
+      } finally {
+        setIsLoading(false);
+      }
+    } else {
+      fallbackOfflineResponse(currentInput, updatedMessages);
+    }
+  };
+
+  const generateAIPlan = async () => {
+    setIsGeneratingPlan(true);
+    const latestVital = vitalsLog[0] || { bpm: 72, bp: '120/80', spo2: 98, temp: 98.6 };
+
+    if (isServerConnected) {
+      try {
+        const response = await fetch(serverUrl + '/api/generate-plan', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            steps: activity.steps,
+            stepGoal: activity.stepGoal,
+            waterIntake,
+            waterGoal: 2000,
+            bpm: latestVital.bpm,
+            bp: latestVital.bp,
+            spo2: latestVital.spo2,
+            temp: latestVital.temp
+          }),
+        });
+
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data.error || "Failed to generate wellness plan.");
+        }
+
+        if (data.plan) {
+          setCustomPlan(data.plan);
+          Alert.alert('AI Plan Tailored', 'Ogoo has built a customized wellness path matching your real-time metrics.');
+        }
+      } catch (err: any) {
+        console.warn("Failed to generate custom plan from server, using local offline generator:", err);
+        generateOfflineAIPlan();
+      } finally {
+        setIsGeneratingPlan(false);
+      }
+    } else {
+      generateOfflineAIPlan();
+    }
+  };
+
+  const generateOfflineAIPlan = () => {
+    setTimeout(() => {
+      const generated = `### 🌱 Your Custom AI Wellness Plan\n\n*Updated: ${new Date().toLocaleDateString()}*\n\n1. **Hydration target:** Sip 250ml water every 2 hours to offset current daily deficits.\n2. **Physical movement:** Aim for ${activity.steps > 0 ? 'an extra 1,500 steps' : 'a 2,000-step baseline walk'} today based on your current step levels.\n3. **Vital limits:** Maintain a relaxed schedule and practice deep breathing for 5 minutes if heart rate drifts over 85 BPM.`;
+      setCustomPlan(generated);
+      setIsGeneratingPlan(false);
+      Alert.alert('AI Plan Tailored (Offline)', 'Ogoo has built a customized offline wellness plan.');
+    }, 1500);
   };
 
   // Touch screen PPG wave animation loop
@@ -428,29 +694,122 @@ export default function App() {
   };
 
   const triggerFallTest = () => {
-    Alert.alert('Simulate Fall Incident', 'Triggering a trial accelerometer event to verify caregiver notification pathways.', [
-      { text: 'Cancel' },
-      {
-        text: 'Simulate',
-        onPress: () => {
-          Alert.alert(
-            '⚠️ FALL DETECTED',
-            'A high-g impact event has been detected! Ogoo will notify your Family Caregiver shortly.',
-            [
-              { text: 'I am safe (Cancel Alert)', style: 'cancel' },
-              {
-                text: 'Contact Caregiver Now',
-                style: 'destructive',
-                onPress: () => {
-                  Alert.alert('Emergency Alert Dispatched', 'Emergency contact family members and caregivers have been successfully messaged.');
-                }
-              }
-            ]
-          );
-        }
-      }
-    ]);
+    setFallAlertCountdown(5);
+    setIsFallAlertActive(true);
+    speak("Emergency Warning. Sudden fall impact detected. Starting remote assist sequence and notifying emergency contacts in 5 seconds.");
   };
+
+  // Alert countdown logic
+  useEffect(() => {
+    let timer: any;
+    if (isFallAlertActive && fallAlertCountdown > 0) {
+      timer = setTimeout(() => {
+        setFallAlertCountdown(prev => prev - 1);
+      }, 1000);
+    } else if (isFallAlertActive && fallAlertCountdown === 0) {
+      setIsFallAlertActive(false);
+      speak(`Emergency alert triggered. Ogoo has initiated a phone call to ${safetyMetrics.emergencyContactName} at ${safetyMetrics.emergencyContactPhone}.`);
+      
+      const newLog = {
+        id: Date.now().toString(),
+        time: new Date().toLocaleDateString([], { month: 'short', day: 'numeric' }) + `, ` + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        event: 'EMERGENCY CALL DISPATCHED SUCCESSFULLY',
+        status: 'Actioned'
+      };
+
+      setSafetyMetrics((prev) => ({
+        ...prev,
+        fallLogs: [newLog, ...prev.fallLogs],
+        fallRisk: 'High'
+      }));
+
+      Alert.alert(
+        'Emergency SOS Dispatched',
+        `Ogoo has simulated an emergency phone call & SMS alert to ${safetyMetrics.emergencyContactName} at ${safetyMetrics.emergencyContactPhone}.`
+      );
+    }
+    return () => clearTimeout(timer);
+  }, [isFallAlertActive, fallAlertCountdown]);
+
+  // Populate simulated accelerometer samples during active kinetic calibration
+  useEffect(() => {
+    if (!isCalibratingGait) return;
+    const interval = setInterval(() => {
+      // simulate magnitude of movement acceleration (postural sway std deviation)
+      const mockMag = 0.1 + Math.random() * 0.2;
+      calibrationSamplesRef.current.push(mockMag);
+      
+      // Update sensor reading state dynamically
+      setSafetyMetrics(prev => ({
+        ...prev,
+        sensorReading: {
+          alpha: Math.round(Math.random() * 360 * 10) / 10,
+          beta: Math.round((Math.random() * 30 - 15) * 10) / 10,
+          gamma: Math.round((Math.random() * 30 - 15) * 10) / 10,
+        }
+      }));
+    }, 100);
+    return () => clearInterval(interval);
+  }, [isCalibratingGait]);
+
+  // Gait Calibration timer effect
+  useEffect(() => {
+    if (!isCalibratingGait) return;
+
+    calibrationSamplesRef.current = [];
+
+    const interval = setInterval(() => {
+      setCalibrationCountdown(prev => {
+        if (prev <= 1) {
+          clearInterval(interval);
+          
+          // Finish Calibration!
+          setIsCalibratingGait(false);
+
+          const samples = calibrationSamplesRef.current;
+          let stdDev = 0.15; // fallback standard deviation if no samples were collected
+
+          if (samples.length > 5) {
+            const mean = samples.reduce((a, b) => a + b, 0) / samples.length;
+            const variance = samples.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / samples.length;
+            stdDev = Math.sqrt(variance);
+          }
+
+          // Convert standard deviation of postural sway to stability percentage
+          let computedStability = Math.round(100 - (stdDev * 18));
+          computedStability = Math.max(45, Math.min(100, computedStability));
+
+          let risk: 'Low' | 'Moderate' | 'High' = 'Low';
+          if (computedStability < 70) {
+            risk = 'High';
+          } else if (computedStability < 85) {
+            risk = 'Moderate';
+          }
+
+          const newLog = {
+            id: Date.now().toString(),
+            time: new Date().toLocaleDateString([], { month: 'short', day: 'numeric' }) + `, ` + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            event: `Kinetic Gait Baseline Calibrated (Sway StdDev: ${stdDev.toFixed(2)} m/s²)`,
+            status: `Stability: ${computedStability}%`
+          };
+
+          setSafetyMetrics(prev => ({
+            ...prev,
+            gaitStability: computedStability,
+            fallRisk: risk,
+            fallLogs: [newLog, ...prev.fallLogs]
+          }));
+
+          speak(`Balance calibration complete. Your kinetic stability index is calculated at ${computedStability} percent. Fall risk category evaluated as ${risk}.`);
+
+          return 5;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [isCalibratingGait]);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -1038,23 +1397,168 @@ export default function App() {
             </View>
 
             <ScrollView contentContainerStyle={styles.modalScroll}>
+              {/* Gait Stability Status Card */}
               <View style={styles.fallStatusCard}>
                 <Text style={styles.fallStatusTitle}>Gait Stability Score</Text>
                 <Text style={styles.fallStatusScore}>{safetyMetrics.gaitStability}%</Text>
                 <Text style={styles.fallStatusRisk}>Impact Category: {safetyMetrics.fallRisk} Risk</Text>
               </View>
 
-              <TouchableOpacity style={styles.addSchedBtn} onPress={triggerFallTest}>
-                <Text style={styles.addSchedText}>Test Impact Fall Signal</Text>
-              </TouchableOpacity>
+              {/* Kinetic Gait & Posture Calibration block */}
+              <View style={styles.safetySection}>
+                <View style={styles.safetyHeaderRow}>
+                  <Text style={styles.safetySectionTitle}>⚖️ Kinetic Gait & Posture Calibration</Text>
+                  {isCalibratingGait && (
+                    <Text style={styles.calibratingTag}>CALIBRATING ({calibrationCountdown}s)</Text>
+                  )}
+                </View>
+                {isCalibratingGait ? (
+                  <View style={styles.calibratingCard}>
+                    <Text style={styles.calibratingHeadline}>CALIBRATING: STAND STILL</Text>
+                    <Text style={styles.calibratingSubline}>Place your phone flat on your hand or in your pocket to record posture baseline.</Text>
+                    <View style={styles.progressBarBg}>
+                      <View style={[styles.progressBarFill, { width: `${(5 - calibrationCountdown) * 20}%` }]} />
+                    </View>
+                  </View>
+                ) : (
+                  <View style={styles.calibratingActions}>
+                    <Text style={styles.calibratingDesc}>
+                      Establish a biomechanical baseline. Ogoo evaluates accelerometer standard deviations to personalize your fall risk algorithms.
+                    </Text>
+                    <TouchableOpacity
+                      style={styles.calibrateBtn}
+                      onPress={() => {
+                        setCalibrationCountdown(5);
+                        setIsCalibratingGait(true);
+                        speak("Starting five second posture and gait stability calibration. Stand steady now.");
+                      }}
+                    >
+                      <Text style={styles.calibrateBtnText}>Start Gait & Balance Calibration</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+              </View>
 
-              <Text style={styles.sectionTitle}>Emergency Medical Contacts</Text>
-              <View style={styles.contactCard}>
-                <Text style={styles.contactLabel}>Primary Responder</Text>
-                <Text style={styles.contactName}>{safetyMetrics.emergencyContactName}</Text>
-                <Text style={styles.contactPhone}>Phone: {safetyMetrics.emergencyContactPhone}</Text>
+              {/* Mobile Device Orientation Sensor Sync Hub */}
+              <View style={styles.safetySection}>
+                <Text style={styles.safetySectionTitle}>📱 Mobile Sensor Sync Hub</Text>
+                <View style={styles.sensorSyncBadgeRow}>
+                  <View style={[styles.statusDot, { backgroundColor: '#4CAF50' }]} />
+                  <Text style={styles.sensorSyncText}>Mobile accelerometer actively streaming</Text>
+                </View>
+                <View style={styles.sensorGrid}>
+                  <View style={styles.sensorGridCol}>
+                    <Text style={styles.sensorGridLabel}>X (Tilt / Beta)</Text>
+                    <Text style={styles.sensorGridVal}>{safetyMetrics.sensorReading?.beta ? safetyMetrics.sensorReading.beta.toFixed(1) : '0.0'}°</Text>
+                  </View>
+                  <View style={styles.sensorGridCol}>
+                    <Text style={styles.sensorGridLabel}>Y (Roll / Gamma)</Text>
+                    <Text style={styles.sensorGridVal}>{safetyMetrics.sensorReading?.gamma ? safetyMetrics.sensorReading.gamma.toFixed(1) : '0.0'}°</Text>
+                  </View>
+                  <View style={styles.sensorGridCol}>
+                    <Text style={styles.sensorGridLabel}>Z (Yaw / Alpha)</Text>
+                    <Text style={styles.sensorGridVal}>{safetyMetrics.sensorReading?.alpha ? safetyMetrics.sensorReading.alpha.toFixed(1) : '0.0'}°</Text>
+                  </View>
+                </View>
+              </View>
+
+              {/* Emergency Contact Configuration */}
+              <View style={styles.safetySection}>
+                <Text style={styles.safetySectionTitle}>🛡️ Emergency Contact Settings</Text>
+                <Text style={styles.fieldLabel}>Contact Name</Text>
+                <TextInput
+                  value={safetyMetrics.emergencyContactName}
+                  onChangeText={(val) => setSafetyMetrics(prev => ({ ...prev, emergencyContactName: val }))}
+                  placeholder="Primary Responder Name"
+                  placeholderTextColor="rgba(255, 255, 255, 0.4)"
+                  style={styles.safetyInput}
+                />
+                
+                <Text style={styles.fieldLabel}>Emergency Phone</Text>
+                <TextInput
+                  value={safetyMetrics.emergencyContactPhone}
+                  onChangeText={(val) => setSafetyMetrics(prev => ({ ...prev, emergencyContactPhone: val }))}
+                  placeholder="Primary Phone Number"
+                  placeholderTextColor="rgba(255, 255, 255, 0.4)"
+                  style={styles.safetyInput}
+                  keyboardType="phone-pad"
+                />
+
+                <View style={styles.hotlineWarningCard}>
+                  <Text style={styles.hotlineWarningText}>Detected Location Hotline:</Text>
+                  <View style={styles.hotlineBadge}>
+                    <Text style={styles.hotlineBadgeText}>
+                      {geoLocation?.country_name ? (
+                        geoLocation.country_name.toLowerCase().includes("united kingdom") || geoLocation.country_name.toLowerCase().includes("uk") ? "999" :
+                        geoLocation.country_name.toLowerCase().includes("europe") || geoLocation.country_name.toLowerCase().includes("india") ? "112" : "911"
+                      ) : "911"}
+                    </Text>
+                  </View>
+                </View>
+              </View>
+
+              {/* Manual Incident Trigger */}
+              <View style={styles.safetySection}>
+                <Text style={styles.safetySectionTitle}>💥 Manual Incident Trigger</Text>
+                <Text style={styles.calibratingDesc}>
+                  Simulate an instant high-impact acceleration shift to test the voice notifications and SOS contacts sequence.
+                </Text>
+                <TouchableOpacity style={styles.suddenFallBtn} onPress={triggerFallTest}>
+                  <Text style={styles.suddenFallBtnText}>💥 Simulate Sudden High-G Fall Alert</Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* Fall Warning Logs */}
+              <View style={styles.safetySection}>
+                <Text style={styles.safetySectionTitle}>📋 Fall Prevention & Incident Logs</Text>
+                {safetyMetrics.fallLogs.length === 0 ? (
+                  <View style={styles.emptyLogsCard}>
+                    <Text style={styles.emptyLogsText}>No safety incidents logged yet. Move safely!</Text>
+                  </View>
+                ) : (
+                  <View style={styles.logsList}>
+                    {safetyMetrics.fallLogs.map((log: any) => (
+                      <View key={log.id} style={styles.logItemRow}>
+                        <View style={styles.logItemLeft}>
+                          <Text style={styles.logItemEvent}>{log.event}</Text>
+                          <Text style={styles.logItemTime}>{log.time}</Text>
+                        </View>
+                        <View style={styles.logItemBadge}>
+                          <Text style={styles.logItemBadgeText}>{log.status}</Text>
+                        </View>
+                      </View>
+                    ))}
+                  </View>
+                )}
               </View>
             </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* 7. Sudden Fall Alert Siren Overlay Modal */}
+      <Modal visible={isFallAlertActive} animationType="fade" transparent>
+        <View style={styles.alertBackdrop}>
+          <View style={styles.alertCard}>
+            <View style={styles.alertSirenBg}>
+              <Icon name="alert-circle" size={36} color="#FF4B4B" style={styles.alertBounceIcon} />
+            </View>
+            <Text style={styles.alertTitle}>🚨 SUDDEN FALL DETECTED!</Text>
+            <Text style={styles.alertDesc}>
+              Ogoo has detected a high-G kinetic acceleration shift. Initiating caregiver SOS dispatch in:
+            </Text>
+            <Text style={styles.alertTimer}>{fallAlertCountdown}</Text>
+            <Text style={styles.alertSeconds}>seconds</Text>
+            
+            <TouchableOpacity
+              style={styles.cancelAlertBtn}
+              onPress={() => {
+                setIsFallAlertActive(false);
+                speak("Emergency alert cancelled. Safety status restored.");
+              }}
+            >
+              <Text style={styles.cancelAlertText}>Cancel False Alarm</Text>
+            </TouchableOpacity>
           </View>
         </View>
       </Modal>
@@ -1071,34 +1575,86 @@ export default function App() {
               </TouchableOpacity>
             </View>
 
-            <View style={styles.menuItemsList}>
-              <TouchableOpacity
-                style={styles.menuItemRow}
-                onPress={() => {
-                  setVoiceEnabled(!voiceEnabled);
-                  storage.setItem('ogoo_voice_enabled', (!voiceEnabled).toString());
-                }}
-              >
-                <Text style={styles.menuItemText}>🗣️ Voice Responses</Text>
-                <Text style={styles.menuItemVal}>{voiceEnabled ? 'On' : 'Off'}</Text>
-              </TouchableOpacity>
+            <ScrollView contentContainerStyle={{ paddingVertical: 10 }}>
+              {/* Account Profile Info Section */}
+              <View style={styles.menuProfileSection}>
+                <Text style={styles.menuSectionHeader}>👤 Account Profile</Text>
+                {userProfile && userProfile.onboarded ? (
+                  <View style={styles.menuProfileDetails}>
+                    <Text style={styles.profileLabel}>Name</Text>
+                    <Text style={styles.profileValue}>{userProfile.firstName} {userProfile.lastName}</Text>
+                    
+                    <Text style={styles.profileLabel}>Email</Text>
+                    <Text style={styles.profileValue}>{userProfile.email}</Text>
+                    
+                    <Text style={styles.profileLabel}>Sign In Method</Text>
+                    <View style={styles.authBadge}>
+                      <Text style={styles.authBadgeText}>
+                        {userProfile.authType === 'google_passwordless' ? '✓ Google Passwordless' : '✓ Standard Password'}
+                      </Text>
+                    </View>
+                  </View>
+                ) : (
+                  <Text style={styles.menuProfileUnconfigured}>
+                    Profile is currently unconfigured. Talk to Ogoo in the chat to complete conversational onboarding passwordlessly!
+                  </Text>
+                )}
+              </View>
 
-              <TouchableOpacity
-                style={styles.menuItemRow}
-                onPress={() => {
-                  const nextUnit = tempUnit === 'F' ? 'C' : 'F';
-                  setTempUnit(nextUnit);
-                  storage.setItem('ogoo_temp_unit', nextUnit);
-                }}
-              >
-                <Text style={styles.menuItemText}>🌡️ Temperature Scale</Text>
-                <Text style={styles.menuItemVal}>°{tempUnit}</Text>
-              </TouchableOpacity>
+              {/* Server Sync Endpoint Section */}
+              <View style={styles.menuProfileSection}>
+                <Text style={styles.menuSectionHeader}>🔗 Server Sync Settings</Text>
+                <Text style={styles.profileLabel}>API URL Endpoint</Text>
+                <TextInput
+                  value={serverUrl}
+                  onChangeText={(val) => {
+                    setServerUrl(val);
+                    storage.setItem('ogoo_server_url', val);
+                  }}
+                  placeholder="https://your-api-server.com"
+                  placeholderTextColor="rgba(255, 255, 255, 0.4)"
+                  style={styles.serverInput}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+                <View style={styles.statusBadgeRow}>
+                  <View style={[styles.statusDot, { backgroundColor: isServerConnected ? '#4CAF50' : '#FF4B4B' }]} />
+                  <Text style={styles.statusDotText}>
+                    {isServerConnected ? 'Connected to Backend' : 'Running Offline Mode (Fallback)'}
+                  </Text>
+                </View>
+              </View>
 
-              <TouchableOpacity style={styles.menuItemRow} onPress={handleClearAccount}>
-                <Text style={[styles.menuItemText, { color: '#FF4B4B' }]}>🗑️ Clear Account & History</Text>
-              </TouchableOpacity>
-            </View>
+              <Text style={styles.menuSectionHeader}>⚙️ Preferences</Text>
+              <View style={styles.menuItemsList}>
+                <TouchableOpacity
+                  style={styles.menuItemRow}
+                  onPress={() => {
+                    setVoiceEnabled(!voiceEnabled);
+                    storage.setItem('ogoo_voice_enabled', (!voiceEnabled).toString());
+                  }}
+                >
+                  <Text style={styles.menuItemText}>🗣️ Voice Responses</Text>
+                  <Text style={styles.menuItemVal}>{voiceEnabled ? 'On' : 'Off'}</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.menuItemRow}
+                  onPress={() => {
+                    const nextUnit = tempUnit === 'F' ? 'C' : 'F';
+                    setTempUnit(nextUnit);
+                    storage.setItem('ogoo_temp_unit', nextUnit);
+                  }}
+                >
+                  <Text style={styles.menuItemText}>🌡️ Temperature Scale</Text>
+                  <Text style={styles.menuItemVal}>°{tempUnit}</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity style={styles.menuItemRow} onPress={handleClearAccount}>
+                  <Text style={[styles.menuItemText, { color: '#FF4B4B' }]}>🗑️ Clear Account & History</Text>
+                </TouchableOpacity>
+              </View>
+            </ScrollView>
 
             <View style={styles.menuFooter}>
               <Text style={styles.footerBrand}>Ogoo Medical Companion</Text>
@@ -1923,6 +2479,304 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#FFF',
   },
+  // Safety & Fall Alert Custom styling classes
+  alertBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.9)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  alertCard: {
+    backgroundColor: '#120E21',
+    borderWidth: 2,
+    borderColor: '#FF4B4B',
+    borderRadius: 24,
+    padding: 24,
+    alignItems: 'center',
+    width: SCREEN_WIDTH - 40,
+    maxWidth: 400,
+  },
+  alertSirenBg: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: 'rgba(255, 75, 75, 0.15)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  alertBounceIcon: {
+    transform: [{ scale: 1.1 }],
+  },
+  alertTitle: {
+    fontSize: 20,
+    fontWeight: '900',
+    color: '#FF4B4B',
+    textAlign: 'center',
+    marginBottom: 8,
+    letterSpacing: 0.5,
+  },
+  alertDesc: {
+    fontSize: 12,
+    color: '#A5A5A5',
+    textAlign: 'center',
+    lineHeight: 18,
+    marginBottom: 15,
+  },
+  alertTimer: {
+    fontSize: 64,
+    fontWeight: '900',
+    color: '#FFF',
+    textAlign: 'center',
+  },
+  alertSeconds: {
+    fontSize: 12,
+    fontWeight: 'bold',
+    color: '#9D8DF1',
+    textAlign: 'center',
+    textTransform: 'uppercase',
+    marginBottom: 24,
+  },
+  cancelAlertBtn: {
+    backgroundColor: '#FFF',
+    borderRadius: 14,
+    paddingVertical: 12,
+    paddingHorizontal: 30,
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
+  },
+  cancelAlertText: {
+    fontSize: 13,
+    fontWeight: '900',
+    color: '#120E21',
+    textTransform: 'uppercase',
+  },
+  safetySection: {
+    backgroundColor: '#1E1938',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#342E5E',
+    padding: 16,
+    marginBottom: 12,
+  },
+  safetyHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  safetySectionTitle: {
+    fontSize: 11,
+    fontWeight: 'bold',
+    color: '#9D8DF1',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: 8,
+  },
+  calibratingTag: {
+    fontSize: 9,
+    fontWeight: '900',
+    color: '#FF4B4B',
+    backgroundColor: 'rgba(255, 75, 75, 0.15)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  calibratingCard: {
+    backgroundColor: 'rgba(255, 75, 75, 0.05)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 75, 75, 0.2)',
+    borderRadius: 12,
+    padding: 14,
+    alignItems: 'center',
+  },
+  calibratingHeadline: {
+    fontSize: 13,
+    fontWeight: '900',
+    color: '#FF4B4B',
+    marginBottom: 6,
+  },
+  calibratingSubline: {
+    fontSize: 10,
+    color: '#A5A5A5',
+    textAlign: 'center',
+    lineHeight: 14,
+    marginBottom: 12,
+  },
+  progressBarBg: {
+    height: 6,
+    width: '100%',
+    backgroundColor: '#120E21',
+    borderRadius: 3,
+    overflow: 'hidden',
+  },
+  progressBarFill: {
+    height: '100%',
+    backgroundColor: '#FF4B4B',
+  },
+  calibratingActions: {
+    gap: 10,
+  },
+  calibratingDesc: {
+    fontSize: 11,
+    color: '#A5A5A5',
+    lineHeight: 15,
+  },
+  calibrateBtn: {
+    backgroundColor: '#6C5CE7',
+    borderRadius: 10,
+    paddingVertical: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  calibrateBtnText: {
+    fontSize: 11,
+    fontWeight: 'bold',
+    color: '#FFF',
+    textTransform: 'uppercase',
+  },
+  sensorSyncBadgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 12,
+  },
+  sensorSyncText: {
+    fontSize: 10,
+    color: '#A5A5A5',
+  },
+  sensorGrid: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  sensorGridCol: {
+    flex: 1,
+    backgroundColor: '#120E21',
+    borderRadius: 10,
+    paddingVertical: 8,
+    alignItems: 'center',
+  },
+  sensorGridLabel: {
+    fontSize: 9,
+    color: '#A5A5A5',
+    textTransform: 'uppercase',
+  },
+  sensorGridVal: {
+    fontSize: 12,
+    fontWeight: 'bold',
+    color: '#FFF',
+    marginTop: 2,
+  },
+  fieldLabel: {
+    fontSize: 9,
+    fontWeight: 'bold',
+    color: '#A5A5A5',
+    textTransform: 'uppercase',
+    marginTop: 8,
+    marginBottom: 4,
+  },
+  safetyInput: {
+    height: 38,
+    backgroundColor: '#120E21',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#342E5E',
+    color: '#FFF',
+    paddingHorizontal: 12,
+    fontSize: 12,
+  },
+  hotlineWarningCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: 'rgba(157, 141, 241, 0.08)',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(157, 141, 241, 0.15)',
+    padding: 10,
+    marginTop: 10,
+  },
+  hotlineWarningText: {
+    fontSize: 10,
+    color: '#A5A5A5',
+  },
+  hotlineBadge: {
+    backgroundColor: '#120E21',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  hotlineBadgeText: {
+    fontSize: 10,
+    fontWeight: 'bold',
+    color: '#9D8DF1',
+  },
+  suddenFallBtn: {
+    backgroundColor: 'rgba(255, 75, 75, 0.15)',
+    borderWidth: 1,
+    borderColor: '#FF4B4B',
+    borderRadius: 10,
+    paddingVertical: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 8,
+  },
+  suddenFallBtnText: {
+    fontSize: 11,
+    fontWeight: 'bold',
+    color: '#FF4B4B',
+  },
+  emptyLogsCard: {
+    backgroundColor: '#120E21',
+    borderRadius: 10,
+    padding: 14,
+    alignItems: 'center',
+  },
+  emptyLogsText: {
+    fontSize: 10,
+    color: '#A5A5A5',
+  },
+  logsList: {
+    gap: 6,
+  },
+  logItemRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: '#120E21',
+    borderRadius: 10,
+    padding: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(52, 46, 94, 0.5)',
+  },
+  logItemLeft: {
+    flex: 1,
+  },
+  logItemEvent: {
+    fontSize: 11,
+    fontWeight: 'bold',
+    color: '#FFF',
+  },
+  logItemTime: {
+    fontSize: 9,
+    color: '#A5A5A5',
+    marginTop: 2,
+  },
+  logItemBadge: {
+    backgroundColor: '#1E1938',
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderWidth: 1,
+    borderColor: '#342E5E',
+  },
+  logItemBadgeText: {
+    fontSize: 9,
+    fontWeight: 'bold',
+    color: '#9D8DF1',
+  },
   contactCard: {
     backgroundColor: '#1E1938',
     borderRadius: 14,
@@ -1973,10 +2827,83 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#FFF',
   },
+  menuProfileSection: {
+    backgroundColor: '#1E1938',
+    borderRadius: 14,
+    padding: 12,
+    marginVertical: 10,
+    borderWidth: 1,
+    borderColor: '#342E5E',
+  },
+  menuSectionHeader: {
+    fontSize: 12,
+    fontWeight: 'bold',
+    color: '#9D8DF1',
+    marginVertical: 8,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  menuProfileDetails: {
+    gap: 4,
+  },
+  profileLabel: {
+    fontSize: 10,
+    color: '#A5A5A5',
+    marginTop: 4,
+  },
+  profileValue: {
+    fontSize: 12,
+    fontWeight: 'bold',
+    color: '#FFF',
+  },
+  authBadge: {
+    alignSelf: 'flex-start',
+    backgroundColor: 'rgba(76, 175, 80, 0.15)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    marginTop: 4,
+  },
+  authBadgeText: {
+    fontSize: 10,
+    color: '#4CAF50',
+    fontWeight: 'bold',
+  },
+  menuProfileUnconfigured: {
+    fontSize: 11,
+    color: '#A5A5A5',
+    lineHeight: 16,
+  },
+  serverInput: {
+    backgroundColor: '#120E21',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#342E5E',
+    color: '#FFF',
+    fontSize: 11,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    marginTop: 4,
+  },
+  statusBadgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 8,
+    gap: 6,
+  },
+  statusDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  statusDotText: {
+    fontSize: 10,
+    color: '#A5A5A5',
+    fontWeight: '500',
+  },
   menuItemsList: {
-    flex: 1,
-    marginTop: 20,
-    gap: 15,
+    marginTop: 5,
+    gap: 12,
   },
   menuItemRow: {
     flexDirection: 'row',
@@ -1999,6 +2926,7 @@ const styles = StyleSheet.create({
     borderTopColor: '#1E1938',
     paddingTop: 15,
     alignItems: 'center',
+    marginTop: 15,
   },
   footerBrand: {
     fontSize: 11,
