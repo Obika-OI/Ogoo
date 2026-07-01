@@ -24,5 +24,8 @@
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
     "noEmit": true
-  }
+  },
+  "exclude": [
+    "App.native.tsx"
+  ]
 }

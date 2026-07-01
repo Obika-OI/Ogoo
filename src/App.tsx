@@ -59,6 +59,39 @@ export default function App() {
   const [userProfile, setUserProfile] = useState<any>(null);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isChatViewActive, setIsChatViewActive] = useState(false);
+  const [isChatCollapsed, setIsChatCollapsed] = useState<boolean>(() => {
+    return localStorage.getItem('ogoo_chat_collapsed') === 'true';
+  });
+  const [isOlderChatsCollapsed, setIsOlderChatsCollapsed] = useState<boolean>(true);
+
+  const isToday = (dateStr?: string) => {
+    if (!dateStr) return false;
+    try {
+      const d = new Date(dateStr);
+      const today = new Date();
+      return d.getDate() === today.getDate() &&
+             d.getMonth() === today.getMonth() &&
+             d.getFullYear() === today.getFullYear();
+    } catch (e) {
+      return false;
+    }
+  };
+
+  const isMessageFromToday = (msg: { id: string; timestamp?: string }) => {
+    if (msg.id === '1') return true; // Keep default greeting visible
+    if (msg.timestamp) {
+      return isToday(msg.timestamp);
+    }
+    const parsedId = parseInt(msg.id, 10);
+    if (!isNaN(parsedId) && parsedId > 1000000000000) {
+      return isToday(new Date(parsedId).toISOString());
+    }
+    return false;
+  };
+
+  useEffect(() => {
+    localStorage.setItem('ogoo_chat_collapsed', isChatCollapsed ? 'true' : 'false');
+  }, [isChatCollapsed]);
 
   const [voiceEnabled, setVoiceEnabled] = useState<boolean>(() => {
     return localStorage.getItem('ogoo_voice_enabled') !== 'false';
@@ -76,6 +109,9 @@ export default function App() {
       .replace(/\[ONBOARDING STATUS:[^\]]+\]/gi, '')
       .replace(/\[SET_PROFILE:[^\]]+\]/gi, '')
       .trim();
+
+    // Phonetically replace Ogoo with Aw-gaww for correct SpeechSynthesis pronunciation
+    cleaned = cleaned.replace(/\bOgoo\b/gi, 'Aw-gaww');
 
     if (!cleaned) return;
 
@@ -212,10 +248,28 @@ export default function App() {
       });
       if (res.ok) {
         const data = await res.json();
-        setUserProfile(data.profile);
         
+        // Disable syncing temporarily during reset
         isLoadedFromServer.current = false;
         
+        // Clear all local storage values
+        localStorage.removeItem('ogoo_water_intake');
+        localStorage.removeItem('ogoo_water_log');
+        localStorage.removeItem('ogoo_schedule');
+        localStorage.removeItem('ogoo_vitals_log');
+        localStorage.removeItem('ogoo_activity');
+        localStorage.removeItem('ogoo_custom_plan');
+        localStorage.removeItem('ogoo_safety_metrics');
+        localStorage.removeItem('ogoo_wearable_device');
+        localStorage.removeItem('ogoo_voice_enabled');
+        localStorage.removeItem('ogoo_temp_unit');
+        localStorage.removeItem('ogoo_chat_collapsed');
+
+        // Generate a fresh new device ID to start absolutely clean
+        const newId = 'ogoo-' + Math.random().toString(36).substring(2, 11) + '-' + Date.now();
+        localStorage.setItem('ogoo_device_id', newId);
+        
+        setUserProfile(data.profile);
         setWaterIntake(0);
         setWaterLog([]);
         setSchedule([]);
@@ -232,13 +286,17 @@ export default function App() {
           emergencyContactPhone: '911'
         });
         
-        setTimeout(() => {
-          isLoadedFromServer.current = true;
-        }, 100);
-
         setMessages([
           { id: '1', text: "Hello! I'm Ogoo, your personal health assistant. How can I help you today?", fromUser: false }
         ]);
+
+        // Update the state device ID which triggers user re-init cleanly
+        setDeviceId(newId);
+        
+        setTimeout(() => {
+          isLoadedFromServer.current = true;
+        }, 300);
+
         setIsMenuOpen(false);
         handleBackToDashboard();
       }
@@ -1525,6 +1583,53 @@ export default function App() {
                 </span>
               </button>
             </div>
+
+            {/* Collapsible Daily Companion Chat Card */}
+            <div className="bg-[#1E1938] border border-[#342E5E] rounded-[28px] p-5 space-y-4">
+              <div className="flex justify-between items-center">
+                <div className="flex items-center space-x-2">
+                  <div className="w-7 h-7 rounded-lg bg-[#6C5CE7]/15 flex items-center justify-center">
+                    <Sparkles className="w-4 h-4 text-[#9D8DF1]" />
+                  </div>
+                  <h3 className="text-[15px] font-extrabold text-white">Daily Companion Chat</h3>
+                </div>
+                <button 
+                  type="button"
+                  onClick={() => setIsChatCollapsed(!isChatCollapsed)}
+                  className="text-xs font-bold text-[#9D8DF1] hover:text-white transition-colors bg-[#120E21] px-3 py-1.5 rounded-xl border border-[#342E5E]/60 cursor-pointer"
+                >
+                  {isChatCollapsed ? 'Expand' : 'Collapse'}
+                </button>
+              </div>
+              
+              {!isChatCollapsed && (
+                <div className="flex flex-col gap-3">
+                  {/* Remove user chat bubble from home screen by only showing the first non-user message */}
+                  {messages.filter(m => !m.fromUser).slice(0, 1).map((msg) => (
+                    <div
+                      key={msg.id}
+                      className="p-4 rounded-[20px] max-w-[100%] text-[14px] leading-relaxed relative bg-[#120E21] border border-[#342E5E]/50 rounded-bl-sm"
+                    >
+                      <div className="space-y-2">
+                        <div className="markdown-body text-white">
+                          <Markdown>{msg.text}</Markdown>
+                        </div>
+                        <div className="flex justify-end pt-1 opacity-50 hover:opacity-100 transition-opacity">
+                          <button
+                            type="button"
+                            onClick={() => speak(msg.text)}
+                            className="text-[10px] text-[#9D8DF1] hover:text-white transition-colors flex items-center space-x-1 cursor-pointer bg-[#1E1938] px-2 py-1 rounded-lg border border-[#342E5E]/40"
+                          >
+                            <Volume2 className="w-3 h-3" />
+                            <span>Speak</span>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         )}
 
@@ -2517,37 +2622,120 @@ export default function App() {
 
         {/* Chat Messages */}
         <div className="flex flex-col gap-3">
-          {(showDashboard ? messages.slice(0, 1) : messages).map((msg) => (
-            <div
-              key={msg.id}
-              className={`p-4 rounded-[20px] max-w-[90%] text-[15px] leading-relaxed relative group ${
-                msg.fromUser 
-                  ? 'bg-[#6C5CE7] self-end rounded-br-sm' 
-                  : 'bg-[#1E1938] self-start rounded-bl-sm border border-[#342E5E]'
-              }`}
-            >
-              {msg.fromUser ? (
-                msg.text
-              ) : (
-                <div className="space-y-2 pr-4">
-                  <div className="markdown-body text-white">
-                    <Markdown>{msg.text}</Markdown>
-                  </div>
-                  <div className="flex justify-end pt-1 opacity-50 hover:opacity-100 transition-opacity">
+          {(() => {
+            if (showDashboard) {
+              return null; // Rendered inline in the dashboard card instead
+            }
+
+            const todayMsgs = messages.filter(isMessageFromToday);
+            const olderMsgs = messages.filter(m => !isMessageFromToday(m));
+
+            return (
+              <>
+                {/* Previous days' chats collapsible */}
+                {olderMsgs.length > 0 && (
+                  <div className="mb-4">
                     <button
                       type="button"
-                      onClick={() => speak(msg.text)}
-                      className="text-[10px] text-[#9D8DF1] hover:text-white transition-colors flex items-center space-x-1 cursor-pointer bg-[#120E21]/60 px-2 py-1 rounded-lg border border-[#342E5E]/40"
-                      title="Speak message"
+                      onClick={() => setIsOlderChatsCollapsed(!isOlderChatsCollapsed)}
+                      className="w-full bg-[#1E1938]/60 hover:bg-[#1E1938] border border-[#342E5E]/50 text-[#9D8DF1] hover:text-white font-bold py-2.5 px-4 rounded-2xl text-xs transition-all flex items-center justify-between cursor-pointer"
                     >
-                      <Volume2 className="w-3 h-3" />
-                      <span>Speak</span>
+                      <span className="flex items-center">
+                        <Clock className="w-3.5 h-3.5 mr-2" />
+                        Older Conversations ({olderMsgs.length} messages)
+                      </span>
+                      <span>{isOlderChatsCollapsed ? 'Expand History' : 'Collapse History'}</span>
                     </button>
+                    
+                    {!isOlderChatsCollapsed && (
+                      <div className="flex flex-col gap-3 mt-3 pl-2 border-l-2 border-[#342E5E]/40 animate-fadeIn">
+                        {olderMsgs.map((msg) => (
+                          <div
+                            key={msg.id}
+                            className={`p-4 rounded-[20px] max-w-[90%] text-[15px] leading-relaxed relative group ${
+                              msg.fromUser 
+                                ? 'bg-[#6C5CE7]/60 self-end rounded-br-sm text-slate-100' 
+                                : 'bg-[#1E1938]/60 self-start rounded-bl-sm border border-[#342E5E]/60 text-slate-300'
+                            }`}
+                          >
+                            {msg.fromUser ? (
+                              msg.text
+                            ) : (
+                              <div className="space-y-2 pr-4">
+                                <div className="markdown-body">
+                                  <Markdown>{msg.text}</Markdown>
+                                </div>
+                                <div className="flex justify-end pt-1 opacity-50 hover:opacity-100 transition-opacity">
+                                  <button
+                                    type="button"
+                                    onClick={() => speak(msg.text)}
+                                    className="text-[10px] text-[#9D8DF1] hover:text-white transition-colors flex items-center space-x-1 cursor-pointer bg-[#120E21]/60 px-2 py-1 rounded-lg border border-[#342E5E]/40"
+                                  >
+                                    <Volume2 className="w-3 h-3" />
+                                    <span>Speak</span>
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
-                </div>
-              )}
-            </div>
-          ))}
+                )}
+
+                {olderMsgs.length > 0 && todayMsgs.length > 0 && (
+                  <div className="flex items-center space-x-2 py-2">
+                    <div className="h-[1px] bg-[#342E5E]/40 flex-1"></div>
+                    <span className="text-[10px] font-extrabold text-[#A5A5A5] uppercase tracking-wider">Today's Conversation</span>
+                    <div className="h-[1px] bg-[#342E5E]/40 flex-1"></div>
+                  </div>
+                )}
+
+                {todayMsgs.length === 0 ? (
+                  <div className="p-4 rounded-[20px] max-w-[90%] text-[15px] leading-relaxed relative bg-[#1E1938] self-start rounded-bl-sm border border-[#342E5E]">
+                    <div className="space-y-2 pr-4">
+                      <div className="markdown-body text-white">
+                        <Markdown>Hello! I'm Ogoo, your personal health assistant. Let's start a fresh chat today! I still remember your profile and previous health targets.</Markdown>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  todayMsgs.map((msg) => (
+                    <div
+                      key={msg.id}
+                      className={`p-4 rounded-[20px] max-w-[90%] text-[15px] leading-relaxed relative group ${
+                        msg.fromUser 
+                          ? 'bg-[#6C5CE7] self-end rounded-br-sm' 
+                          : 'bg-[#1E1938] self-start rounded-bl-sm border border-[#342E5E]'
+                      }`}
+                    >
+                      {msg.fromUser ? (
+                        msg.text
+                      ) : (
+                        <div className="space-y-2 pr-4">
+                          <div className="markdown-body text-white">
+                            <Markdown>{msg.text}</Markdown>
+                          </div>
+                          <div className="flex justify-end pt-1 opacity-50 hover:opacity-100 transition-opacity">
+                            <button
+                              type="button"
+                              onClick={() => speak(msg.text)}
+                              className="text-[10px] text-[#9D8DF1] hover:text-white transition-colors flex items-center space-x-1 cursor-pointer bg-[#120E21]/60 px-2 py-1 rounded-lg border border-[#342E5E]/40"
+                              title="Speak message"
+                            >
+                              <Volume2 className="w-3 h-3" />
+                              <span>Speak</span>
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ))
+                )}
+              </>
+            );
+          })()}
           {isLoading && (
             <div className="bg-[#1E1938] p-4 rounded-[20px] max-w-[85%] self-start rounded-bl-sm w-[70px] flex justify-center items-center border border-[#342E5E]">
               <Loader2 className="w-5 h-5 text-[#9D8DF1] animate-spin" />
