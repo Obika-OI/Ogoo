@@ -116,6 +116,13 @@ const storage = {
   },
 };
 
+let Constants: any;
+try {
+  Constants = require('expo-constants').default;
+} catch (e) {
+  console.warn('expo-constants not found');
+}
+
 const getDefaultServerUrl = () => {
   if (typeof window !== 'undefined' && window.location && window.location.origin) {
     // If we are served on localhost or custom domain, map relative to that origin
@@ -124,6 +131,15 @@ const getDefaultServerUrl = () => {
     }
     return window.location.origin;
   }
+  
+  if (Constants && Constants.expoConfig && Constants.expoConfig.hostUri) {
+    const hostUri = Constants.expoConfig.hostUri;
+    const ipAddress = hostUri.split(':')[0];
+    if (ipAddress) {
+      return `http://${ipAddress}:3000`;
+    }
+  }
+  
   return 'https://ais-pre-khyrmcr6izppq2kdqhgmac-272660763298.europe-west2.run.app';
 };
 
@@ -206,6 +222,8 @@ export default function App() {
     let cleaned = text
       .replace(/[*_#`~>]/g, '')
       .replace(/\[([^\]]+)\]\([^\)]+\)/g, '$1')
+      .replace(/\[ONBOARDING STATUS:[^\]]+\]/gi, '')
+      .replace(/\[SET_PROFILE:[^\]]+\]/gi, '')
       .replace(/\[[^\]]+\]/gi, '')
       .trim();
 
@@ -224,6 +242,13 @@ export default function App() {
     } else {
       console.log("[Ogoo Speech Output]:", cleaned);
     }
+  };
+
+  const cleanMessageText = (text: string) => {
+    return text
+      .replace(/\[ONBOARDING STATUS:[^\]]+\]/gi, '')
+      .replace(/\[SET_PROFILE:[^\]]+\]/gi, '')
+      .trim();
   };
 
   // Check if dates are today
@@ -1136,7 +1161,7 @@ export default function App() {
                           { opacity: 0.7 }
                         ]}
                       >
-                        <Text style={styles.chatBubbleText}>{msg.text}</Text>
+                        <Text style={styles.chatBubbleText}>{msg.fromUser ? msg.text : cleanMessageText(msg.text)}</Text>
                       </View>
                     ))}
                   </View>
@@ -1164,7 +1189,7 @@ export default function App() {
                     msg.fromUser ? styles.bubbleUser : styles.bubbleBot
                   ]}
                 >
-                  <Text style={styles.chatBubbleText}>{msg.text}</Text>
+                  <Text style={styles.chatBubbleText}>{msg.fromUser ? msg.text : cleanMessageText(msg.text)}</Text>
                   {!msg.fromUser && (
                     <TouchableOpacity onPress={() => speak(msg.text)} style={styles.bubbleSpeakBtn}>
                       <Icon name="volume-high" size={14} color="#9D8DF1" />
