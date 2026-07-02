@@ -21,12 +21,33 @@ import {
 
 // Standard React Native AsyncStorage and Expo speech references.
 // We provide fallback code so the app compiles and runs cleanly in any Expo or Bare React Native setup!
-import AsyncStorage from '@react-native-async-storage/async-storage';
+let AsyncStorage: any;
+try {
+  AsyncStorage = require('@react-native-async-storage/async-storage').default;
+} catch (e) {
+  console.warn('AsyncStorage package not found, using memory fallback');
+}
 
-import { Audio } from 'expo-av';
-import * as FileSystem from 'expo-file-system';
-import * as Speech from 'expo-speech';
-import Constants from 'expo-constants';
+let Speech: any;
+try {
+  Speech = require('expo-speech');
+} catch (e) {
+  console.warn('Expo Speech package not found, using console-speak fallback');
+}
+
+let Audio: any;
+try {
+  Audio = require('expo-av').Audio;
+} catch (e) {
+  console.warn('Expo AV package not found');
+}
+
+let FileSystem: any;
+try {
+  FileSystem = require('expo-file-system');
+} catch (e) {
+  console.warn('Expo FileSystem package not found');
+}
 
 // Icon mappings using popular Expo Vector Icons.
 let Icon: any;
@@ -95,6 +116,12 @@ const storage = {
   },
 };
 
+let Constants: any;
+try {
+  Constants = require('expo-constants').default;
+} catch (e) {
+  console.warn('expo-constants not found');
+}
 
 const getDefaultServerUrl = () => {
   if (typeof window !== 'undefined' && window.location && window.location.origin) {
