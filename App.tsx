@@ -35,6 +35,20 @@ try {
   console.warn('Expo Speech package not found, using console-speak fallback');
 }
 
+let Audio: any;
+try {
+  Audio = require('expo-av').Audio;
+} catch (e) {
+  console.warn('Expo AV package not found');
+}
+
+let FileSystem: any;
+try {
+  FileSystem = require('expo-file-system');
+} catch (e) {
+  console.warn('Expo FileSystem package not found');
+}
+
 // Icon mappings using popular Expo Vector Icons.
 let Icon: any;
 try {
@@ -105,6 +119,9 @@ const storage = {
 const getDefaultServerUrl = () => {
   if (typeof window !== 'undefined' && window.location && window.location.origin) {
     // If we are served on localhost or custom domain, map relative to that origin
+    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+      return 'http://localhost:3000';
+    }
     return window.location.origin;
   }
   return 'https://ais-pre-khyrmcr6izppq2kdqhgmac-272660763298.europe-west2.run.app';
@@ -122,6 +139,10 @@ export default function App() {
   const [isChatCollapsed, setIsChatCollapsed] = useState(false);
   const [isOlderChatsCollapsed, setIsOlderChatsCollapsed] = useState(true);
   const [voiceEnabled, setVoiceEnabled] = useState(true);
+  
+  // Audio Recording State
+  const [recording, setRecording] = useState<any>(null);
+  const [isRecording, setIsRecording] = useState(false);
 
   // Health Metrics States
   const [waterIntake, setWaterIntake] = useState(0);
@@ -471,11 +492,48 @@ export default function App() {
     }, 1000);
   };
 
-  // Send Daily Chat Request proxying to live Gemini LLM on the server
-  const handleSendMessage = async () => {
-    if (!inputText.trim() || isLoading) return;
+  const startRecording = async () => {
+    if (!Audio) {
+      Alert.alert('Microphone Unavailable', 'Audio recording is not supported on this device.');
+      return;
+    }
+    try {
+      await Audio.requestPermissionsAsync();
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: true,
+        playsInSilentModeIOS: true,
+      });
+      const { recording } = await Audio.Recording.createAsync(
+        Audio.RecordingOptionsPresets.HIGH_QUALITY
+      );
+      setRecording(recording);
+      setIsRecording(true);
+    } catch (err) {
+      console.warn('Failed to start recording', err);
+    }
+  };
 
-    const currentInput = inputText.trim();
+  const stopRecording = async () => {
+    if (!recording) return;
+    setIsRecording(false);
+    try {
+      await recording.stopAndUnloadAsync();
+      const uri = recording.getURI();
+      setRecording(null);
+      if (uri && FileSystem) {
+        const base64 = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
+        handleSendMessage(base64);
+      }
+    } catch (err) {
+      console.warn('Failed to stop recording', err);
+    }
+  };
+
+  // Send Daily Chat Request proxying to live Gemini LLM on the server
+  const handleSendMessage = async (audioBase64?: string) => {
+    if (!audioBase64 && (!inputText.trim() || isLoading)) return;
+
+    const currentInput = audioBase64 ? "🎤 Audio message" : inputText.trim();
     const userMsg = {
       id: Date.now().toString(),
       text: currentInput,
@@ -520,7 +578,8 @@ export default function App() {
           body: JSON.stringify({ 
             deviceId: deviceId,
             location: geoLocation,
-            message: currentInput, 
+            message: typeof audioBase64 === 'string' ? "" : currentInput,
+            audioData: typeof audioBase64 === 'string' ? audioBase64 : undefined,
             mode: 'normal',
             vitals: vitalsLog[0] || null,
             activity: activity,
@@ -1131,7 +1190,14 @@ export default function App() {
               placeholderTextColor="rgba(255, 255, 255, 0.4)"
               style={styles.chatInput}
             />
-            <TouchableOpacity onPress={handleSendMessage} style={styles.sendBtn}>
+            <TouchableOpacity 
+              onPressIn={startRecording} 
+              onPressOut={stopRecording}
+              style={[styles.sendBtn, isRecording && { backgroundColor: '#FF4B4B' }]}
+            >
+              <Icon name="microphone" size={20} color="#FFF" />
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => handleSendMessage()} style={styles.sendBtn}>
               <Icon name="send" size={20} color="#FFF" />
             </TouchableOpacity>
           </View>

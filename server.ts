@@ -406,7 +406,22 @@ Use these metrics to provide highly personalized health coaching and answers! If
       }
 
       // Add the new user message to contents list
-      contents.push({ role: 'user', parts: [{ text: message }] });
+      const userParts: any[] = [];
+      if (message) {
+        userParts.push({ text: message });
+      }
+      if (req.body.audioData) {
+        userParts.push({
+          inlineData: {
+            data: req.body.audioData,
+            mimeType: req.body.audioMimeType || "audio/mp4" // defaults to audio/mp4 if missing
+          }
+        });
+      }
+      if (userParts.length === 0) {
+        userParts.push({ text: "Hello" });
+      }
+      contents.push({ role: 'user', parts: userParts });
 
       // Keep last 15 messages to prevent rate limits on free tier
       if (contents.length > 15) {
