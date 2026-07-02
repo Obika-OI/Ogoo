@@ -107,7 +107,7 @@ const getDefaultServerUrl = () => {
     // If we are served on localhost or custom domain, map relative to that origin
     return window.location.origin;
   }
-  return 'https://ais-dev-khyrmcr6izppq2kdqhgmac-272660763298.europe-west2.run.app';
+  return 'https://ais-pre-khyrmcr6izppq2kdqhgmac-272660763298.europe-west2.run.app';
 };
 
 export default function App() {
