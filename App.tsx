@@ -23,28 +23,32 @@ import {
 // We provide fallback code so the app compiles and runs cleanly in any Expo or Bare React Native setup!
 let AsyncStorage: any;
 try {
-  AsyncStorage = require('@react-native-async-storage/async-storage').default;
+  const mod = require('@react-native-async-storage/async-storage');
+  AsyncStorage = mod ? (mod.default || mod) : null;
 } catch (e) {
   console.warn('AsyncStorage package not found, using memory fallback');
 }
 
 let Speech: any;
 try {
-  Speech = require('expo-speech');
+  const mod = require('expo-speech');
+  Speech = mod ? mod : null;
 } catch (e) {
   console.warn('Expo Speech package not found, using console-speak fallback');
 }
 
 let Audio: any;
 try {
-  Audio = require('expo-av').Audio;
+  const mod = require('expo-av');
+  Audio = mod ? mod.Audio : null;
 } catch (e) {
   console.warn('Expo AV package not found');
 }
 
 let FileSystem: any;
 try {
-  FileSystem = require('expo-file-system');
+  const mod = require('expo-file-system');
+  FileSystem = mod ? mod : null;
 } catch (e) {
   console.warn('Expo FileSystem package not found');
 }
@@ -52,8 +56,9 @@ try {
 // Icon mappings using popular Expo Vector Icons.
 let Icon: any;
 try {
-  const { MaterialCommunityIcons } = require('@expo/vector-icons');
-  Icon = MaterialCommunityIcons;
+  const icons = require('@expo/vector-icons');
+  Icon = icons && icons.MaterialCommunityIcons ? icons.MaterialCommunityIcons : null;
+  if (!Icon) throw new Error('Missing MaterialCommunityIcons');
 } catch (e) {
   // If expo-vector-icons is not available, we use simple custom Text badges.
   Icon = ({ name, size, color, style }: any) => {
@@ -118,7 +123,8 @@ const storage = {
 
 let Constants: any;
 try {
-  Constants = require('expo-constants').default;
+  const mod = require('expo-constants');
+  Constants = mod ? (mod.default || mod) : null;
 } catch (e) {
   console.warn('expo-constants not found');
 }
