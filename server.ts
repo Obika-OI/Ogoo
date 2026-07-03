@@ -406,22 +406,7 @@ Use these metrics to provide highly personalized health coaching and answers! If
       }
 
       // Add the new user message to contents list
-      const userParts: any[] = [];
-      if (message) {
-        userParts.push({ text: message });
-      }
-      if (req.body.audioData) {
-        userParts.push({
-          inlineData: {
-            data: req.body.audioData,
-            mimeType: req.body.audioMimeType || "audio/mp4" // defaults to audio/mp4 if missing
-          }
-        });
-      }
-      if (userParts.length === 0) {
-        userParts.push({ text: "Hello" });
-      }
-      contents.push({ role: 'user', parts: userParts });
+      contents.push({ role: 'user', parts: [{ text: message }] });
 
       // Keep last 15 messages to prevent rate limits on free tier
       if (contents.length > 15) {
@@ -448,11 +433,6 @@ Use these metrics to provide highly personalized health coaching and answers! If
         });
       } catch (firstErr: any) {
         console.warn("First chat attempt failed, trying robust fallback model:", firstErr);
-        if (firstErr.status === 401 || firstErr.message?.includes('UNAUTHENTICATED')) {
-          // If it's an auth error, there is no point trying the fallback model with the same key
-          throw firstErr;
-        }
-        
         model = "gemini-3.1-flash-lite";
         response = await currentAi.models.generateContent({
           model,
@@ -578,13 +558,7 @@ Use these metrics to provide highly personalized health coaching and answers! If
       if (e?.status === 429 || e?.message?.includes("429") || e?.message?.includes("Quota exceeded")) {
         return res.status(429).json({ error: "You've exceeded your quota for this model. Please try a simpler request or check your billing plan." });
       }
-      
-      let errorMsg = e.message || "Failed to process chat";
-      if (e?.status === 401 || errorMsg.includes("UNAUTHENTICATED")) {
-        errorMsg = "Ogoo is having trouble connecting to her knowledge base. The Gemini API key might be invalid or missing. Please check the Settings > Secrets panel and update it.";
-      }
-      
-      res.status(500).json({ error: errorMsg });
+      res.status(500).json({ error: e.message });
     }
   });
 
@@ -617,10 +591,6 @@ Keep it realistic, highly tailored to their current vitals/activity level, and f
         });
       } catch (firstErr: any) {
         console.warn("Generate plan first attempt failed, trying fallback:", firstErr);
-        if (firstErr.status === 401 || firstErr.message?.includes('UNAUTHENTICATED')) {
-          throw firstErr;
-        }
-        
         model = "gemini-3.1-flash-lite";
         response = await currentAi.models.generateContent({
           model,
@@ -634,11 +604,7 @@ Keep it realistic, highly tailored to their current vitals/activity level, and f
       res.json({ plan: response.text });
     } catch (e: any) {
       console.error("Generate plan error:", e);
-      let errorMsg = e.message || "Failed to generate plan.";
-      if (e?.status === 401 || errorMsg.includes("UNAUTHENTICATED")) {
-        errorMsg = "The Gemini API key is missing or invalid. Please update it in Settings > Secrets.";
-      }
-      res.status(500).json({ error: errorMsg });
+      res.status(500).json({ error: e.message || "Failed to generate plan." });
     }
   });
 
@@ -684,10 +650,6 @@ Keep it realistic, highly tailored to their current vitals/activity level, and f
         });
       } catch (firstErr: any) {
         console.warn("Analyze media failed, trying fallback model:", firstErr);
-        if (firstErr.status === 401 || firstErr.message?.includes('UNAUTHENTICATED')) {
-          throw firstErr;
-        }
-        
         model = "gemini-3.1-flash-lite";
         response = await currentAi.models.generateContent({
           model,
@@ -708,12 +670,7 @@ Keep it realistic, highly tailored to their current vitals/activity level, and f
       if (e?.status === 429 || e?.message?.includes("429") || e?.message?.includes("Quota exceeded")) {
         return res.status(429).json({ error: "You've exceeded your quota for this model. Please try a simpler request or check your billing plan." });
       }
-      
-      let errorMsg = e.message || "Failed to process media.";
-      if (e?.status === 401 || errorMsg.includes("UNAUTHENTICATED")) {
-        errorMsg = "The Gemini API key is missing or invalid. Please update it in Settings > Secrets.";
-      }
-      res.status(500).json({ error: errorMsg });
+      res.status(500).json({ error: e.message });
     }
   });
 

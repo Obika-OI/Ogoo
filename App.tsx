@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { userInit, userUpdateMetrics, backendChat, generatePlan, userClear } from './server.native';
 import {
   StyleSheet,
   View,
@@ -23,42 +24,23 @@ import {
 // We provide fallback code so the app compiles and runs cleanly in any Expo or Bare React Native setup!
 let AsyncStorage: any;
 try {
-  const mod = require('@react-native-async-storage/async-storage');
-  AsyncStorage = mod ? (mod.default || mod) : null;
+  AsyncStorage = require('@react-native-async-storage/async-storage').default;
 } catch (e) {
   console.warn('AsyncStorage package not found, using memory fallback');
 }
 
 let Speech: any;
 try {
-  const mod = require('expo-speech');
-  Speech = mod ? mod : null;
+  Speech = require('expo-speech');
 } catch (e) {
   console.warn('Expo Speech package not found, using console-speak fallback');
-}
-
-let Audio: any;
-try {
-  const mod = require('expo-av');
-  Audio = mod ? mod.Audio : null;
-} catch (e) {
-  console.warn('Expo AV package not found');
-}
-
-let FileSystem: any;
-try {
-  const mod = require('expo-file-system');
-  FileSystem = mod ? mod : null;
-} catch (e) {
-  console.warn('Expo FileSystem package not found');
 }
 
 // Icon mappings using popular Expo Vector Icons.
 let Icon: any;
 try {
-  const icons = require('@expo/vector-icons');
-  Icon = icons && icons.MaterialCommunityIcons ? icons.MaterialCommunityIcons : null;
-  if (!Icon) throw new Error('Missing MaterialCommunityIcons');
+  const { MaterialCommunityIcons } = require('@expo/vector-icons');
+  Icon = MaterialCommunityIcons;
 } catch (e) {
   // If expo-vector-icons is not available, we use simple custom Text badges.
   Icon = ({ name, size, color, style }: any) => {
@@ -121,32 +103,12 @@ const storage = {
   },
 };
 
-let Constants: any;
-try {
-  const mod = require('expo-constants');
-  Constants = mod ? (mod.default || mod) : null;
-} catch (e) {
-  console.warn('expo-constants not found');
-}
-
 const getDefaultServerUrl = () => {
   if (typeof window !== 'undefined' && window.location && window.location.origin) {
     // If we are served on localhost or custom domain, map relative to that origin
-    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-      return 'http://localhost:3000';
-    }
     return window.location.origin;
   }
-  
-  if (Constants && Constants.expoConfig && Constants.expoConfig.hostUri) {
-    const hostUri = Constants.expoConfig.hostUri;
-    const ipAddress = hostUri.split(':')[0];
-    if (ipAddress) {
-      return `http://${ipAddress}:3000`;
-    }
-  }
-  
-  return 'https://ais-pre-khyrmcr6izppq2kdqhgmac-272660763298.europe-west2.run.app';
+  return 'https://ais-dev-khyrmcr6izppq2kdqhgmac-272660763298.europe-west2.run.app';
 };
 
 export default function App() {
@@ -161,10 +123,6 @@ export default function App() {
   const [isChatCollapsed, setIsChatCollapsed] = useState(false);
   const [isOlderChatsCollapsed, setIsOlderChatsCollapsed] = useState(true);
   const [voiceEnabled, setVoiceEnabled] = useState(true);
-  
-  // Audio Recording State
-  const [recording, setRecording] = useState<any>(null);
-  const [isRecording, setIsRecording] = useState(false);
 
   // Health Metrics States
   const [waterIntake, setWaterIntake] = useState(0);
@@ -228,8 +186,6 @@ export default function App() {
     let cleaned = text
       .replace(/[*_#`~>]/g, '')
       .replace(/\[([^\]]+)\]\([^\)]+\)/g, '$1')
-      .replace(/\[ONBOARDING STATUS:[^\]]+\]/gi, '')
-      .replace(/\[SET_PROFILE:[^\]]+\]/gi, '')
       .replace(/\[[^\]]+\]/gi, '')
       .trim();
 
@@ -248,13 +204,6 @@ export default function App() {
     } else {
       console.log("[Ogoo Speech Output]:", cleaned);
     }
-  };
-
-  const cleanMessageText = (text: string) => {
-    return text
-      .replace(/\[ONBOARDING STATUS:[^\]]+\]/gi, '')
-      .replace(/\[SET_PROFILE:[^\]]+\]/gi, '')
-      .trim();
   };
 
   // Check if dates are today
@@ -355,11 +304,7 @@ export default function App() {
 
       // 5. Query /api/user/init to sync with the backend
       try {
-        const initRes = await fetch(currentServerUrl + '/api/user/init', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ deviceId: id, location: loc })
-        });
+        const initRes = await userInit({ deviceId: id, location: loc });
         if (initRes.ok) {
           const data = await initRes.json();
           setIsServerConnected(true);
@@ -394,14 +339,10 @@ export default function App() {
   const syncMetrics = async (metricsToUpdate: any) => {
     if (!deviceId || !isLoadedFromServer.current) return;
     try {
-      await fetch(serverUrl + '/api/user/update-metrics', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      await userUpdateMetrics({
           deviceId,
           ...metricsToUpdate
-        })
-      });
+        });
     } catch (err) {
       console.warn("Failed to sync metrics with server on mobile:", err);
     }
@@ -523,48 +464,11 @@ export default function App() {
     }, 1000);
   };
 
-  const startRecording = async () => {
-    if (!Audio) {
-      Alert.alert('Microphone Unavailable', 'Audio recording is not supported on this device.');
-      return;
-    }
-    try {
-      await Audio.requestPermissionsAsync();
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: true,
-        playsInSilentModeIOS: true,
-      });
-      const { recording } = await Audio.Recording.createAsync(
-        Audio.RecordingOptionsPresets.HIGH_QUALITY
-      );
-      setRecording(recording);
-      setIsRecording(true);
-    } catch (err) {
-      console.warn('Failed to start recording', err);
-    }
-  };
-
-  const stopRecording = async () => {
-    if (!recording) return;
-    setIsRecording(false);
-    try {
-      await recording.stopAndUnloadAsync();
-      const uri = recording.getURI();
-      setRecording(null);
-      if (uri && FileSystem) {
-        const base64 = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
-        handleSendMessage(base64);
-      }
-    } catch (err) {
-      console.warn('Failed to stop recording', err);
-    }
-  };
-
   // Send Daily Chat Request proxying to live Gemini LLM on the server
-  const handleSendMessage = async (audioBase64?: string) => {
-    if (!audioBase64 && (!inputText.trim() || isLoading)) return;
+  const handleSendMessage = async () => {
+    if (!inputText.trim() || isLoading) return;
 
-    const currentInput = audioBase64 ? "🎤 Audio message" : inputText.trim();
+    const currentInput = inputText.trim();
     const userMsg = {
       id: Date.now().toString(),
       text: currentInput,
@@ -584,11 +488,7 @@ export default function App() {
     if (!activeServerConnected) {
       // Dynamic connection auto-healing
       try {
-        const initRes = await fetch(serverUrl + '/api/user/init', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ deviceId: deviceId, location: geoLocation })
-        });
+        const initRes = await userInit({ deviceId: deviceId, location: geoLocation });
         if (initRes.ok) {
           const data = await initRes.json();
           setIsServerConnected(true);
@@ -603,26 +503,21 @@ export default function App() {
 
     if (activeServerConnected) {
       try {
-        const response = await fetch(serverUrl + '/api/chat', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ 
+        const response = await backendChat({ 
             deviceId: deviceId,
             location: geoLocation,
-            message: typeof audioBase64 === 'string' ? "" : currentInput,
-            audioData: typeof audioBase64 === 'string' ? audioBase64 : undefined,
+            message: currentInput, 
             mode: 'normal',
             vitals: vitalsLog[0] || null,
             activity: activity,
             waterIntake: waterIntake,
             waterGoal: 2000,
             schedule: schedule
-          }),
-        });
+          })
 
-        const data = await response.json();
+        const data = response;
         
-        if (!response.ok) {
+        if (response.error) {
           const errMsg = {
             id: (Date.now() + 1).toString(),
             text: data.error || "I'm having trouble connecting to my brain. Please try again.",
@@ -693,23 +588,9 @@ export default function App() {
           await storage.setItem('ogoo_chat_history', JSON.stringify(finalMessages));
         }
         speak(data.reply);
-      } catch (error: any) {
-        console.warn("API Chat failed:", error);
-        
-        if (error.message && (error.message.includes("Gemini API key") || error.message.includes("Ogoo is having trouble"))) {
-          const botMsg = {
-            id: (Date.now() + 1).toString(),
-            text: error.message,
-            fromUser: false,
-            timestamp: new Date().toISOString()
-          };
-          const finalMessages = [...updatedMessages, botMsg];
-          setMessages(finalMessages);
-          await storage.setItem('ogoo_chat_history', JSON.stringify(finalMessages));
-        } else {
-          console.warn("Falling back to offline simulation...");
-          fallbackOfflineResponse(currentInput, updatedMessages);
-        }
+      } catch (error) {
+        console.warn("API Chat failed, falling back to offline simulation:", error);
+        fallbackOfflineResponse(currentInput, updatedMessages);
       } finally {
         setIsLoading(false);
       }
@@ -724,10 +605,7 @@ export default function App() {
 
     if (isServerConnected) {
       try {
-        const response = await fetch(serverUrl + '/api/generate-plan', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
+        const response = await generatePlan({
             steps: activity.steps,
             stepGoal: activity.stepGoal,
             waterIntake,
@@ -736,11 +614,10 @@ export default function App() {
             bp: latestVital.bp,
             spo2: latestVital.spo2,
             temp: latestVital.temp
-          }),
-        });
+          })
 
-        const data = await response.json();
-        if (!response.ok) {
+        const data = response;
+        if (response.error) {
           throw new Error(data.error || "Failed to generate wellness plan.");
         }
 
@@ -749,12 +626,8 @@ export default function App() {
           Alert.alert('AI Plan Tailored', 'Ogoo has built a customized wellness path matching your real-time metrics.');
         }
       } catch (err: any) {
-        console.warn("Failed to generate custom plan from server:", err);
-        if (err.message && (err.message.includes("Gemini API key") || err.message.includes("missing"))) {
-          Alert.alert("Knowledge Base Offline", err.message);
-        } else {
-          generateOfflineAIPlan();
-        }
+        console.warn("Failed to generate custom plan from server, using local offline generator:", err);
+        generateOfflineAIPlan();
       } finally {
         setIsGeneratingPlan(false);
       }
@@ -1167,7 +1040,7 @@ export default function App() {
                           { opacity: 0.7 }
                         ]}
                       >
-                        <Text style={styles.chatBubbleText}>{msg.fromUser ? msg.text : cleanMessageText(msg.text)}</Text>
+                        <Text style={styles.chatBubbleText}>{msg.text}</Text>
                       </View>
                     ))}
                   </View>
@@ -1195,7 +1068,7 @@ export default function App() {
                     msg.fromUser ? styles.bubbleUser : styles.bubbleBot
                   ]}
                 >
-                  <Text style={styles.chatBubbleText}>{msg.fromUser ? msg.text : cleanMessageText(msg.text)}</Text>
+                  <Text style={styles.chatBubbleText}>{msg.text}</Text>
                   {!msg.fromUser && (
                     <TouchableOpacity onPress={() => speak(msg.text)} style={styles.bubbleSpeakBtn}>
                       <Icon name="volume-high" size={14} color="#9D8DF1" />
@@ -1221,14 +1094,7 @@ export default function App() {
               placeholderTextColor="rgba(255, 255, 255, 0.4)"
               style={styles.chatInput}
             />
-            <TouchableOpacity 
-              onPressIn={startRecording} 
-              onPressOut={stopRecording}
-              style={[styles.sendBtn, isRecording && { backgroundColor: '#FF4B4B' }]}
-            >
-              <Icon name="microphone" size={20} color="#FFF" />
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => handleSendMessage()} style={styles.sendBtn}>
+            <TouchableOpacity onPress={handleSendMessage} style={styles.sendBtn}>
               <Icon name="send" size={20} color="#FFF" />
             </TouchableOpacity>
           </View>
@@ -2463,12 +2329,6 @@ const styles = StyleSheet.create({
     color: '#FFF',
     marginTop: 20,
     marginBottom: 10,
-  },
-  emptyLogsText: {
-    fontSize: 12,
-    color: '#A5A5A5',
-    fontStyle: 'italic',
-    marginVertical: 8,
   },
   logItem: {
     flexDirection: 'row',

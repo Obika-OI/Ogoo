@@ -745,10 +745,10 @@ export default function App() {
         setMessages((prev) => [...prev, ogooMsg]);
       }
       speak(data.reply);
-    } catch (error: any) {
+    } catch (error) {
       setMessages((prev) => [...prev, {
         id: 'error',
-        text: error.message || "I'm having trouble connecting. Check your internet?",
+        text: "I'm having trouble connecting. Check your internet?",
         fromUser: false
       }]);
     } finally {
