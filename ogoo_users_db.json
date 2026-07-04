@@ -1,1 +1,38 @@
-{}
+{
+  "ogoo-lcc1s9ujy-1782912724327": {
+    "deviceId": "ogoo-lcc1s9ujy-1782912724327",
+    "location": {
+      "city": "Sheffield",
+      "region": "England",
+      "country_name": "United Kingdom",
+      "latitude": 53.386,
+      "longitude": -1.4648
+    },
+    "onboarded": false,
+    "returningStatus": "NOT_CHOSEN",
+    "authType": "NOT_CHOSEN",
+    "history": [],
+    "waterIntake": 0,
+    "waterLog": [],
+    "schedule": [],
+    "vitalsLog": [],
+    "activity": {
+      "steps": 0,
+      "stepGoal": 10000,
+      "minutes": 0,
+      "calories": 0
+    },
+    "customPlan": "",
+    "safetyMetrics": {
+      "fallRisk": "Low",
+      "gaitStability": 98,
+      "phoneSensorSynced": false,
+      "sensorReading": {
+        "alpha": 0,
+        "beta": 0,
+        "gamma": 0
+      },
+      "fallLogs": []
+    }
+  }
+}
