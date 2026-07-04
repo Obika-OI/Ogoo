@@ -1,6 +1,5 @@
 {
   "compilerOptions": {
-    "skipLibCheck": true,
     "target": "ES2022",
     "experimentalDecorators": true,
     "useDefineForClassFields": false,
@@ -26,5 +25,8 @@
     "allowSyntheticDefaultImports": true,
     "noEmit": true
   },
+  "exclude": [
+    "App.tsx"
+  ],
   "extends": "expo/tsconfig.base"
 }

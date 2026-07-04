@@ -19,7 +19,6 @@ interface UserRecord {
   email?: string;
   password?: string;
   authType?: string;
-  returningStatus?: string;
   location?: any;
   onboarded: boolean;
   history?: any[];
@@ -82,17 +81,6 @@ export async function startServer() {
   const wss = new WebSocketServer({ server, path: '/live' });
 
   app.use(express.json());
-
-  // CORS middleware for cross-origin requests from mobile/Expo previews
-  app.use((req, res, next) => {
-    res.header("Access-Control-Allow-Origin", "*");
-    res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization");
-    res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-    if (req.method === 'OPTIONS') {
-      return res.sendStatus(200);
-    }
-    next();
-  });
 
   // Wait to initialize GenAI until it's needed to fail fast properly if missing
   let ai: GoogleGenAI | null = null;
@@ -181,8 +169,6 @@ export async function startServer() {
           deviceId,
           location: location || null,
           onboarded: false,
-          returningStatus: 'NOT_CHOSEN',
-          authType: 'NOT_CHOSEN',
           history: [],
           waterIntake: 0,
           waterLog: [],
@@ -195,8 +181,6 @@ export async function startServer() {
         saveDb(db);
       } else {
         // Ensure default properties exist for compatibility and starting clean
-        if (userRecord.returningStatus === undefined) userRecord.returningStatus = 'NOT_CHOSEN';
-        if (userRecord.authType === undefined) userRecord.authType = 'NOT_CHOSEN';
         if (userRecord.waterIntake === undefined) userRecord.waterIntake = 0;
         if (!userRecord.waterLog) userRecord.waterLog = [];
         if (!userRecord.schedule) userRecord.schedule = [];
@@ -235,8 +219,6 @@ export async function startServer() {
       db[deviceId] = {
         deviceId,
         onboarded: false,
-        returningStatus: 'NOT_CHOSEN',
-        authType: 'NOT_CHOSEN',
         history: [],
         waterIntake: 0,
         waterLog: [],
@@ -300,8 +282,6 @@ export async function startServer() {
           deviceId,
           location: location || null,
           onboarded: false,
-          returningStatus: 'NOT_CHOSEN',
-          authType: 'NOT_CHOSEN',
           history: [],
           waterIntake: 0,
           waterLog: [],
@@ -314,8 +294,6 @@ export async function startServer() {
         saveDb(db);
       } else {
         // Back-fill fields if they don't exist yet
-        if (userRecord.returningStatus === undefined) userRecord.returningStatus = 'NOT_CHOSEN';
-        if (userRecord.authType === undefined) userRecord.authType = 'NOT_CHOSEN';
         if (userRecord.waterIntake === undefined) userRecord.waterIntake = 0;
         if (!userRecord.waterLog) userRecord.waterLog = [];
         if (!userRecord.schedule) userRecord.schedule = [];
@@ -347,24 +325,18 @@ export async function startServer() {
       if (!userRecord.onboarded) {
         onboardingContext = `
 \n[ONBOARDING STATUS: AWAITING COMPLETED PROFILE]
-You are currently in onboarding and login flow with this user. They are NOT fully onboarded or logged in yet.
+You are currently in onboarding mode with this user. They are NOT fully onboarded yet.
 CRITICAL PROCESS INSTRUCTIONS:
-1. First, check if the user has chosen whether they are a RETURNING friend or a NEW friend (returningStatus is currently: ${userRecord.returningStatus || 'NOT_CHOSEN'}).
-   - If returningStatus is "NOT_CHOSEN", you MUST ask them: "Are you an old friend returning to me, or are we meeting as new friends for the very first time today?" Keep the tone incredibly warm, social, and emotional. Explain that if they are returning, you can retrieve all their previous history and logs! Do NOT ask for first name, email, or passwords yet.
-   - If they say they are returning, instruct them to provide the email address they registered with, so we can find them. Once they provide an email, output this exact tag: [CONVERSATIONAL_LOGIN: {"email": "user@example.com"}]
-   - If they say they are a new friend, set returningStatus to "new" by outputting: [SET_PROFILE: {"returningStatus": "new"}]
-2. If returningStatus is "new":
-   - First, check if the user has chosen their authentication type yet (authType is currently: ${userRecord.authType || 'NOT_CHOSEN'}). If they have not explicitly chosen between "password" or secure "google_passwordless" yet, you MUST ask them to choose first. Explain both options with friendly energy. Do NOT ask for their first name, last name, or email yet.
-   - If they have chosen their authType but have not provided their firstName (currently: ${userRecord.firstName || 'NOT_GIVEN'}), ask for their First Name.
-   - If they have provided firstName but not lastName (currently: ${userRecord.lastName || 'NOT_GIVEN'}), ask for their Last Name.
-   - If they have provided lastName but not email (currently: ${userRecord.email || 'NOT_GIVEN'}), ask for their Email.
-   - If they chose "password" and have not chosen a password yet, ask them for their password choice to complete onboarding. If they chose "google_passwordless", complete the onboarding directly.
+1. First, check if the user has chosen their authentication type yet (authType is currently: ${userRecord.authType || 'NOT_CHOSEN'}). If they have not explicitly chosen between "password" or secure "google_passwordless" yet, you MUST ask them to choose first. Explain both options with friendly energy. Do NOT ask for their first name, last name, or email yet.
+2. If they have chosen their authType but have not provided their firstName (currently: ${userRecord.firstName || 'NOT_GIVEN'}), ask for their First Name.
+3. If they have provided firstName but not lastName (currently: ${userRecord.lastName || 'NOT_GIVEN'}), ask for their Last Name.
+4. If they have provided lastName but not email (currently: ${userRecord.email || 'NOT_GIVEN'}), ask for their Email.
+5. If they chose "password" and have not chosen a password yet, ask them for their password choice to complete onboarding. If they chose "google_passwordless", complete the onboarding directly.
 
 Only ask for ONE detail at a time, keeping it perfectly friendly, empathetic, and social.
 - Detected Device ID: ${deviceId}
 - Detected Location: ${userRecord.location ? `${userRecord.location.city || "Unknown City"}, ${userRecord.location.region || "Unknown Region"}, ${userRecord.location.country_name || "Unknown Country"}` : "Searching approximate coordinates..."}
 At the end of your response, output the appropriate JSON tag so the server updates their profile:
-- On choosing returning/new status: [SET_PROFILE: {"returningStatus": "returning"}] or [SET_PROFILE: {"returningStatus": "new"}]
 - On choosing authentication mode: [SET_PROFILE: {"authType": "password"}] or [SET_PROFILE: {"authType": "google_passwordless"}]
 - On first name: [SET_PROFILE: {"firstName": "Name"}]
 - On last name: [SET_PROFILE: {"lastName": "Name"}]
@@ -459,53 +431,8 @@ Use these metrics to provide highly personalized health coaching and answers! If
         }
       }
 
-      // Parse any conversational login tag
-      const loginRegex = /\[CONVERSATIONAL_LOGIN:\s*({[^\]]+})\]/i;
-      const loginMatch = loginRegex.exec(responseText);
-      let customWelcomeReply: string | null = null;
-      if (loginMatch) {
-        try {
-          const loginData = JSON.parse(loginMatch[1]);
-          const targetEmail = loginData.email ? loginData.email.trim().toLowerCase() : "";
-          if (targetEmail) {
-            // Find an onboarded user with this email in the database
-            const allUsers = Object.values(db);
-            const matchedUser = allUsers.find(u => u.email && u.email.trim().toLowerCase() === targetEmail && u.onboarded);
-            if (matchedUser) {
-              // Found! Merge matchedUser into userRecord
-              userRecord.firstName = matchedUser.firstName;
-              userRecord.lastName = matchedUser.lastName;
-              userRecord.email = matchedUser.email;
-              userRecord.authType = matchedUser.authType;
-              userRecord.password = matchedUser.password;
-              userRecord.onboarded = true;
-              userRecord.returningStatus = 'returning';
-              userRecord.waterIntake = matchedUser.waterIntake || 0;
-              userRecord.waterLog = matchedUser.waterLog || [];
-              userRecord.schedule = matchedUser.schedule || [];
-              userRecord.vitalsLog = matchedUser.vitalsLog || [];
-              userRecord.activity = matchedUser.activity || { steps: 0, stepGoal: 10000, minutes: 0, calories: 0 };
-              userRecord.customPlan = matchedUser.customPlan || "";
-              userRecord.safetyMetrics = matchedUser.safetyMetrics || { fallRisk: 'Low', gaitStability: 98, phoneSensorSynced: false, sensorReading: { alpha: 0, beta: 0, gamma: 0 }, fallLogs: [] };
-              
-              // Restore history
-              userRecord.history = matchedUser.history || [];
-              
-              customWelcomeReply = `I found you! *smiles warmly with tears of joy* Welcome back, ${matchedUser.firstName}! I've fully restored all of your previous physical routines, daily logs, and our past conversations. It is so wonderful to see you again. How can I support your health and heart today?`;
-            } else {
-              customWelcomeReply = `I searched my memories, but I couldn't find an existing onboarded friend under the email "${targetEmail}". Could it be a different email? Or would you like to start a fresh new journey with me as a new friend today?`;
-            }
-          }
-        } catch (err) {
-          console.error("Failed to process CONVERSATIONAL_LOGIN:", err);
-        }
-      }
-
-      // Remove the [SET_PROFILE: ...] and [CONVERSATIONAL_LOGIN: ...] tags so the user never sees technical JSON blocks
-      let cleanReply = responseText.replace(setProfileRegex, "").replace(loginRegex, "").trim();
-      if (customWelcomeReply) {
-        cleanReply = customWelcomeReply;
-      }
+      // Remove the [SET_PROFILE: ...] tags so the user never sees technical JSON blocks
+      const cleanReply = responseText.replace(setProfileRegex, "").trim();
 
       // Save user message to database history
       const userMsgId = Date.now().toString();

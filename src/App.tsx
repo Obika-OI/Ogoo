@@ -696,54 +696,14 @@ export default function App() {
       // Update local profile with latest server onboarding updates
       if (data.profile) {
         setUserProfile(data.profile);
-        if (data.profile.history && data.profile.history.length > 0) {
-          setMessages(data.profile.history);
-          
-          // Sync all health metrics and store in localStorage
-          if (data.profile.waterIntake !== undefined) {
-            setWaterIntake(data.profile.waterIntake);
-            localStorage.setItem('ogoo_water_intake', data.profile.waterIntake.toString());
-          }
-          if (data.profile.waterLog) {
-            setWaterLog(data.profile.waterLog);
-            localStorage.setItem('ogoo_water_log', JSON.stringify(data.profile.waterLog));
-          }
-          if (data.profile.schedule) {
-            setSchedule(data.profile.schedule);
-            localStorage.setItem('ogoo_schedule', JSON.stringify(data.profile.schedule));
-          }
-          if (data.profile.vitalsLog) {
-            setVitalsLog(data.profile.vitalsLog);
-            localStorage.setItem('ogoo_vitals_log', JSON.stringify(data.profile.vitalsLog));
-          }
-          if (data.profile.activity) {
-            setActivity(data.profile.activity);
-            localStorage.setItem('ogoo_activity', JSON.stringify(data.profile.activity));
-          }
-          if (data.profile.customPlan) {
-            setCustomPlan(data.profile.customPlan);
-            localStorage.setItem('ogoo_custom_plan', data.profile.customPlan);
-          }
-          if (data.profile.safetyMetrics) {
-            setSafetyMetrics(data.profile.safetyMetrics);
-            localStorage.setItem('ogoo_safety_metrics', JSON.stringify(data.profile.safetyMetrics));
-          }
-        } else {
-          const ogooMsg = { 
-            id: (Date.now() + 1).toString(), 
-            text: data.reply, 
-            fromUser: false 
-          };
-          setMessages((prev) => [...prev, ogooMsg]);
-        }
-      } else {
-        const ogooMsg = { 
-          id: (Date.now() + 1).toString(), 
-          text: data.reply, 
-          fromUser: false 
-        };
-        setMessages((prev) => [...prev, ogooMsg]);
       }
+
+      const ogooMsg = { 
+        id: (Date.now() + 1).toString(), 
+        text: data.reply, 
+        fromUser: false 
+      };
+      setMessages((prev) => [...prev, ogooMsg]);
       speak(data.reply);
     } catch (error) {
       setMessages((prev) => [...prev, {
